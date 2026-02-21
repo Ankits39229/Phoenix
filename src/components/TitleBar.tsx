@@ -28,11 +28,6 @@ const TitleBar = () => {
       </div>
       
       <div className="flex items-center gap-3 no-drag">
-        <div className="flex items-center gap-2 px-4 py-2 rounded-full bg-purple-100/50 backdrop-blur-sm">
-          <div className="w-2 h-2 rounded-full bg-purple-500"></div>
-          <span className="text-sm text-gray-700">Order is arriving in 10 minutes</span>
-        </div>
-        
         <button 
           onClick={handleMinimize}
           className="w-10 h-10 flex items-center justify-center hover:bg-white/60 rounded-full transition-colors"

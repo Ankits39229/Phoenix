@@ -8,19 +8,27 @@ pnpm-debug.log*
 lerna-debug.log*
 
 # Dependencies
-node_modules
-dist
-dist-ssr
-*.local
+node_modules/
 
 # Build outputs
 dist/
+dist-ssr/
 build/
+out/
+*.local
+
+# Electron packager / builder output
+release/
+app-builds/
+
+# Rust build artifacts
+rust-backend/target/
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
-.idea
+!.vscode/settings.json
+.idea/
 .DS_Store
 *.suo
 *.ntvs*
@@ -35,3 +43,10 @@ build/
 
 # OS
 Thumbs.db
+desktop.ini
+
+# TypeScript incremental build info
+*.tsbuildinfo
+
+# Vite cache
+.vite/
