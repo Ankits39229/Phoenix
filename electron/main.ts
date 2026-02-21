@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import * as path from 'path';
 import * as os from 'os';
 import { execSync, spawn, ChildProcess } from 'child_process';
@@ -122,7 +122,11 @@ ipcMain.handle('get-drives', async () => {
 ipcMain.handle('scan-drive', async (_event, driveLetter: string, mode: string = 'quick') => {
   try {
     const backendPath = getRustBackendPath();
-    const driveArg = driveLetter.replace(':', '');
+    // If it's a full path like "C:\Users\Desktop", extract just the drive letter.
+    // If it's "C:" or "C", keep just the letter.
+    const driveArg = driveLetter.length > 2
+      ? driveLetter.charAt(0).toUpperCase()
+      : driveLetter.replace(':', '').toUpperCase();
     
     return new Promise((resolve, reject) => {
       // Send initial scanning status
@@ -245,6 +249,102 @@ ipcMain.handle('check-admin', async () => {
     return JSON.parse(result);
   } catch (error) {
     return { is_admin: false, message: 'Failed to check admin status' };
+  }
+});
+
+// Open a folder in Windows Explorer
+ipcMain.handle('open-folder', async (_event, folderPath: string) => {
+  await shell.openPath(folderPath);
+});
+
+// Recover selected files using Rust backend
+ipcMain.handle('recover-files', async (_event, driveLetter: string, files: any[], destinationFolder: string) => {
+  const backendPath = getRustBackendPath();
+  const driveArg = driveLetter.length > 2
+    ? driveLetter.charAt(0).toUpperCase()
+    : driveLetter.replace(':', '').toUpperCase();
+
+  const results: any[] = [];
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+
+    if (mainWindow) {
+      mainWindow.webContents.send('recover-progress', {
+        current: i + 1,
+        total: files.length,
+        fileName: file.name || '',
+        percent: Math.round(((i) / files.length) * 100),
+      });
+    }
+
+    await new Promise<void>((resolve) => {
+      const fileJson = JSON.stringify(file);
+
+      // Rust's save_carved_file expects a full FILE path, not a folder.
+      // Build: <destinationFolder>/<sanitized_filename>
+      // Sanitize name: strip chars that are illegal in Windows filenames.
+      const rawName: string = file.name || `recovered_file_${i + 1}`;
+      const safeName = rawName.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
+
+      // Avoid collisions: if a file with this name already exists, suffix with index.
+      let destFilePath = path.join(destinationFolder, safeName);
+      const { existsSync } = require('fs');
+      if (existsSync(destFilePath)) {
+        const ext = path.extname(safeName);
+        const base = path.basename(safeName, ext);
+        destFilePath = path.join(destinationFolder, `${base}_recovered_${i + 1}${ext}`);
+      }
+
+      const proc = spawn(backendPath, ['recover-deleted', driveArg, fileJson, destFilePath]);
+      let stdout = '';
+      let stderr = '';
+      proc.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+      proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+      proc.on('close', () => {
+        try {
+          results.push({ name: file.name, ...JSON.parse(stdout.trim()) });
+        } catch {
+          results.push({ name: file.name, success: false, message: stderr.trim() || 'Unknown error', bytes_recovered: 0 });
+        }
+        resolve();
+      });
+      proc.on('error', (err: Error) => {
+        results.push({ name: file.name, success: false, message: err.message, bytes_recovered: 0 });
+        resolve();
+      });
+    });
+  }
+
+  if (mainWindow) {
+    mainWindow.webContents.send('recover-progress', {
+      current: files.length,
+      total: files.length,
+      fileName: '',
+      percent: 100,
+    });
+  }
+
+  return {
+    recovered: results.filter((r) => r.success).length,
+    failed: results.filter((r) => !r.success).length,
+    total: files.length,
+    results,
+  };
+});
+
+// Relaunch the app with Administrator privileges (UAC prompt on Windows)
+ipcMain.handle('relaunch-as-admin', async () => {
+  try {
+    const execPath = process.execPath;
+    // In development the exec path is the electron binary itself; pass the app path as arg
+    const appArgs = process.argv.slice(1).map((a) => `"${a}"`).join(' ');
+    const cmd = `Start-Process "${execPath}" ${appArgs ? `-ArgumentList ${appArgs}` : ''} -Verb RunAs`;
+    spawn('powershell', ['-Command', cmd], { detached: true, stdio: 'ignore' }).unref();
+    setTimeout(() => app.quit(), 500);
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, message: err.message };
   }
 });
 

@@ -65,6 +65,24 @@ declare global {
       onScanProgress: (callback: (data: ScanProgress) => void) => () => void
       selectFolder: () => Promise<string | null>
       getSpecialFolders: () => Promise<{ desktop: string; downloads: string }>
+      relunchAsAdmin: () => Promise<{ success: boolean; message?: string }>
+      openFolder: (folderPath: string) => Promise<void>
+      recoverFiles: (
+        driveLetter: string,
+        files: RecoverableFile[],
+        destFolder: string
+      ) => Promise<{
+        recovered: number
+        failed: number
+        total: number
+        results: Array<{ name: string; success: boolean; message?: string; bytes_recovered?: number }>
+      }>
+      onRecoverProgress: (callback: (data: {
+        current: number
+        total: number
+        fileName: string
+        percent: number
+      }) => void) => () => void
     }
   }
 }

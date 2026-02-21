@@ -21,6 +21,9 @@ import {
   FileCode,
   Pause,
   Square,
+  CheckCircle,
+  XCircle,
+  FolderInput,
 } from 'lucide-react'
 
 // â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -186,6 +189,52 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [relunchingAdmin, setRelunchingAdmin] = useState(false)
+
+  // ── Recovery state ──────────────────────────────────────────────────────────
+  interface RecoverState {
+    phase: 'recovering' | 'done'
+    current: number
+    total: number
+    fileName: string
+    percent: number
+    destFolder: string
+    recovered?: number
+    failed?: number
+    results?: Array<{ name: string; success: boolean; message?: string; bytes_recovered?: number }>
+  }
+  const [recoverState, setRecoverState] = useState<RecoverState | null>(null)
+
+  const handleRecover = async () => {
+    // Collect files to recover: selected ones, or all visible if none selected
+    const filesToRecover =
+      selectedIds.size > 0
+        ? displayFiles.filter((f, i) => selectedIds.has(f.id || String(i)))
+        : displayFiles
+    if (filesToRecover.length === 0) return
+
+    const destFolder = await window.electron.selectFolder()
+    if (!destFolder) return
+
+    setRecoverState({ phase: 'recovering', current: 0, total: filesToRecover.length, fileName: '', percent: 0, destFolder })
+
+    const cleanup = window.electron.onRecoverProgress((data) => {
+      setRecoverState((prev) =>
+        prev ? { ...prev, current: data.current, fileName: data.fileName, percent: data.percent } : null
+      )
+    })
+
+    try {
+      const res = await window.electron.recoverFiles(drive.letter, filesToRecover, destFolder)
+      cleanup()
+      setRecoverState((prev) =>
+        prev ? { ...prev, phase: 'done', recovered: res.recovered, failed: res.failed, results: res.results, percent: 100 } : null
+      )
+    } catch {
+      cleanup()
+      setRecoverState(null)
+    }
+  }
 
   const scanStarted = useRef(false)
   const isPaused = useRef(false)
@@ -212,15 +261,30 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
 
     return () => cleanup()
   }, [drive.letter])
+  // Folder filter: if drive.letter is a full path (e.g. Desktop), only show files within it.
+  // NOTE: deleted files lose their original path in the MFT (moved to $Recycle.Bin or path cleared),
+  // so we ALWAYS include deleted files — filtering only non-deleted ones by path.
+  const folderFilter = drive.letter.length > 2 ? drive.letter.replace(/\\/g, '/').toLowerCase() : null
+  const filterByFolder = (arr: RecoverableFile[]): RecoverableFile[] => {
+    if (!folderFilter) return arr
+    return arr.filter((f) => {
+      // Always show deleted files — their path is unreliable after deletion
+      if (f.is_deleted) return true
+      const fp = (f.path || '').replace(/\\/g, '/').toLowerCase()
+      // Also match files in $Recycle.Bin by original name heuristic
+      if (fp.includes('$recycle.bin')) return true
+      return fp.startsWith(folderFilter)
+    })
+  }
 
   // â”€â”€ Category counts â”€â”€
   const categoryCounts = (() => {
     if (!result) return {} as Record<FileCategory, number>
-    const all: RecoverableFile[] = [
+    const all = filterByFolder([
       ...(result.mft_entries || []),
       ...(result.carved_files || []),
       ...(result.orphan_files || []),
-    ]
+    ])
     const counts: Record<FileCategory, number> = {
       Photo: 0, Video: 0, Audio: 0, Document: 0, Email: 0,
       Database: 0, Webfiles: 0, Archive: 0, Others: 0, Unsaved: 0, Game: 0,
@@ -232,11 +296,11 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
   // â”€â”€ Filtered display files â”€â”€
   const displayFiles = (() => {
     if (!result) return []
-    let files: RecoverableFile[] = [
+    let files: RecoverableFile[] = filterByFolder([
       ...(result.mft_entries || []),
       ...(result.carved_files || []),
       ...(result.orphan_files || []),
-    ]
+    ])
     if (selectedCategory) files = files.filter((f) => getCategory(f) === selectedCategory)
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase()
@@ -271,7 +335,7 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
 
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   return (
-    <div className="flex-1 flex flex-col overflow-hidden">
+    <div className="relative flex-1 flex flex-col overflow-hidden">
       {/* â”€â”€ Top Nav Bar â”€â”€ */}
       <div className="flex items-center gap-3 px-5 py-3 mt-16 mx-5 rounded-2xl bg-white/50 backdrop-blur-md shadow-sm shrink-0">
         {/* Home */}
@@ -420,7 +484,7 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
         <div className="flex-1 flex flex-col overflow-hidden rounded-2xl bg-white/50 backdrop-blur-md shadow-sm">
           {/* Select all row */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100/80 shrink-0">
-            {result ? (
+            {result && result.success ? (
               <label className="flex items-center gap-2 cursor-pointer" onClick={toggleAll}>
                 <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-all ${
                   selectedIds.size > 0 && selectedIds.size === displayFiles.length
@@ -444,7 +508,7 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
               </label>
             ) : (
               <span className="text-xs text-gray-400">
-                {isScanning ? 'Scanning...' : error ? 'Scan failed' : 'No results'}
+                {isScanning ? 'Scanning...' : result && !result.success ? (result.requires_admin ? '⚠ Administrator required' : 'Scan failed') : error ? 'Scan failed' : 'No results'}
               </span>
             )}
             <span className="text-xs text-gray-400 tabular-nums">
@@ -494,8 +558,48 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
               </div>
             )}
 
+            {/* Admin / failure state */}
+            {result && !result.success && (
+              <div className="flex flex-col items-center justify-center h-full gap-5">
+                <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className="w-8 h-8 text-amber-500" strokeWidth="1.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                  </svg>
+                </div>
+                <div className="text-center max-w-sm">
+                  {result.requires_admin ? (
+                    <>
+                      <p className="text-sm font-bold text-gray-800">Administrator Privileges Required</p>
+                      <p className="text-xs text-gray-500 mt-1.5 leading-relaxed">
+                        Scanning for deleted files requires raw disk access, which needs Administrator rights.
+                        Please restart the app as Administrator to proceed.
+                      </p>
+                      <button
+                        disabled={relunchingAdmin}
+                        onClick={async () => {
+                          setRelunchingAdmin(true)
+                          await window.electron.relunchAsAdmin()
+                        }}
+                        className="mt-4 px-5 py-2 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white text-sm font-semibold shadow hover:shadow-md active:scale-95 transition-all disabled:opacity-60"
+                      >
+                        {relunchingAdmin ? 'Relaunching…' : '🛡 Restart as Administrator'}
+                      </button>
+                      <p className="text-[10px] text-gray-400 mt-2">
+                        Or right-click the app shortcut → Run as administrator
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-sm font-bold text-gray-700">Scan Failed</p>
+                      <p className="text-xs text-gray-400 mt-1">{result.message}</p>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Grid view */}
-            {result && viewMode === 'grid' && (
+            {result && result.success && viewMode === 'grid' && (
               <div className="grid grid-cols-6 gap-2">
                 {displayFiles.length === 0 ? (
                   <div className="col-span-5 flex flex-col items-center justify-center py-16 gap-3">
@@ -519,7 +623,7 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
             )}
 
             {/* List view */}
-            {result && viewMode === 'list' && (
+            {result && result.success && viewMode === 'list' && (
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-white/80 backdrop-blur-sm z-10">
                   <tr className="text-left text-gray-400 font-semibold uppercase tracking-wider border-b border-gray-100">
@@ -587,7 +691,7 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
             )}
 
             {/* Detail view */}
-            {result && viewMode === 'detail' && (
+            {result && result.success && viewMode === 'detail' && (
               <div className="flex flex-col gap-0.5">
                 {displayFiles.slice(0, 500).map((file, idx) => {
                   const id = file.id || String(idx)
@@ -678,19 +782,117 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
         )}
 
         {/* Recover button */}
+        {result && result.success && !isScanning && selectedIds.size === 0 && displayFiles.length > 0 && (
+          <span className="text-[11px] text-gray-400 italic">Select files to recover, or click to recover all</span>
+        )}
         <button
-          className={`px-5 py-2 rounded-xl text-sm font-semibold transition-all shadow-sm ${
+          onClick={handleRecover}
+          disabled={isScanning || !result?.success || displayFiles.length === 0}
+          className={`px-5 py-2 rounded-xl text-sm font-semibold transition-all shadow-sm whitespace-nowrap ${
             selectedIds.size > 0
               ? 'bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:shadow-md hover:scale-[1.02]'
-              : result && !isScanning
+              : result && result.success && !isScanning && displayFiles.length > 0
               ? 'bg-gradient-to-r from-blue-400 to-purple-400 text-white hover:from-blue-500 hover:to-purple-500'
               : 'bg-gray-200 text-gray-400 cursor-not-allowed'
           }`}
-          disabled={!result && isScanning}
         >
-          {selectedIds.size > 0 ? `Recover (${selectedIds.size})` : 'Recover'}
+          {selectedIds.size > 0
+            ? `Recover (${selectedIds.size})`
+            : displayFiles.length > 0
+            ? `Recover All (${displayFiles.length})`
+            : 'Recover'}
         </button>
       </div>
+
+      {/* ── Recovery Modal Overlay ── */}
+      {recoverState && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/60 backdrop-blur-md rounded-2xl">
+          <div className="w-[420px] rounded-2xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+            {/* Header */}
+            <div className="px-6 py-4 bg-gradient-to-r from-blue-500 to-purple-500 text-white">
+              <p className="font-bold text-base">
+                {recoverState.phase === 'recovering' ? 'Recovering Files…' : 'Recovery Complete'}
+              </p>
+              <p className="text-xs text-white/70 mt-0.5 truncate">→ {recoverState.destFolder}</p>
+            </div>
+
+            <div className="px-6 py-5 flex flex-col gap-4">
+              {recoverState.phase === 'recovering' ? (
+                <>
+                  {/* Progress bar */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between text-xs text-gray-500">
+                      <span>{recoverState.current} / {recoverState.total} files</span>
+                      <span>{recoverState.percent}%</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-blue-400 to-purple-500 transition-all duration-300"
+                        style={{ width: `${recoverState.percent}%` }}
+                      />
+                    </div>
+                  </div>
+                  {/* Current file */}
+                  {recoverState.fileName && (
+                    <div className="flex items-center gap-2 bg-blue-50 rounded-lg px-3 py-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse shrink-0" />
+                      <p className="text-xs text-blue-700 truncate font-medium">{recoverState.fileName}</p>
+                    </div>
+                  )}
+                  <p className="text-[11px] text-gray-400 text-center">Please wait, do not close the app…</p>
+                </>
+              ) : (
+                <>
+                  {/* Summary */}
+                  <div className="flex gap-3">
+                    <div className="flex-1 rounded-xl bg-green-50 border border-green-100 px-4 py-3 text-center">
+                      <CheckCircle size={20} className="text-green-500 mx-auto mb-1" />
+                      <p className="text-2xl font-bold text-green-600">{recoverState.recovered}</p>
+                      <p className="text-[11px] text-green-500">Recovered</p>
+                    </div>
+                    <div className="flex-1 rounded-xl bg-red-50 border border-red-100 px-4 py-3 text-center">
+                      <XCircle size={20} className="text-red-400 mx-auto mb-1" />
+                      <p className="text-2xl font-bold text-red-400">{recoverState.failed}</p>
+                      <p className="text-[11px] text-red-400">Failed</p>
+                    </div>
+                  </div>
+                  {/* Failed files list */}
+                  {(recoverState.results || []).filter((r) => !r.success).length > 0 && (
+                    <div className="max-h-28 overflow-y-auto space-y-1">
+                      {(recoverState.results || []).filter((r) => !r.success).map((r, i) => (
+                        <div key={i} className="flex items-start gap-1.5 text-[11px] text-red-500 bg-red-50 rounded px-2 py-1">
+                          <XCircle size={11} className="mt-0.5 shrink-0" />
+                          <span className="truncate font-medium">{r.name}</span>
+                          <span className="text-red-300 shrink-0">— {r.message}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {/* Open folder + close */}
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={() => setRecoverState(null)}
+                      className="flex-1 py-2 rounded-xl border border-gray-200 text-gray-500 text-sm font-medium hover:bg-gray-50 transition-all"
+                    >
+                      Close
+                    </button>
+                    <button
+                      onClick={() => {
+                        window.electron.openFolder(recoverState.destFolder)
+                        setRecoverState(null)
+                      }}
+                      className="flex-1 py-2 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white text-sm font-semibold hover:shadow-md transition-all flex items-center justify-center gap-1.5"
+                    >
+                      <FolderInput size={14} />
+                      Open Folder
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

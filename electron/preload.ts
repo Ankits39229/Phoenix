@@ -15,4 +15,12 @@ contextBridge.exposeInMainWorld('electron', {
   },
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   getSpecialFolders: () => ipcRenderer.invoke('get-special-folders'),
+  relunchAsAdmin: () => ipcRenderer.invoke('relaunch-as-admin'),
+  openFolder: (folderPath: string) => ipcRenderer.invoke('open-folder', folderPath),
+  recoverFiles: (driveLetter: string, files: any[], destFolder: string) =>
+    ipcRenderer.invoke('recover-files', driveLetter, files, destFolder),
+  onRecoverProgress: (callback: (data: any) => void) => {
+    ipcRenderer.on('recover-progress', (_event, data) => callback(data));
+    return () => ipcRenderer.removeAllListeners('recover-progress');
+  },
 });
