@@ -1,9 +1,5 @@
-import { useEffect, useState } from 'react'
-import { 
-  HardDrive,
-  Mic,
-  Lock
-} from 'lucide-react'
+﻿import { useEffect, useState } from 'react'
+import { Lock, Monitor, Download, FolderOpen, HardDrive } from 'lucide-react'
 
 interface DashboardProps {
   onDriveClick: (drive: DriveInfo) => void
@@ -12,106 +8,207 @@ interface DashboardProps {
 const Dashboard = ({ onDriveClick }: DashboardProps) => {
   const [drives, setDrives] = useState<DriveInfo[]>([])
   const [loading, setLoading] = useState(true)
+  const [specialFolders, setSpecialFolders] = useState<{ desktop: string; downloads: string } | null>(null)
 
   useEffect(() => {
-    const fetchDrives = async () => {
+    const init = async () => {
       try {
         if (window.electron?.getDrives) {
-          const driveData = await window.electron.getDrives()
+          const [driveData, folders] = await Promise.all([
+            window.electron.getDrives(),
+            window.electron.getSpecialFolders(),
+          ])
           setDrives(driveData)
+          setSpecialFolders(folders)
         }
       } catch (error) {
-        console.error('Error fetching drives:', error)
+        console.error('Error during init:', error)
       } finally {
         setLoading(false)
       }
     }
-
-    fetchDrives()
+    init()
   }, [])
 
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return '0 GB'
-    const gb = bytes / (1024 ** 3)
-    if (gb >= 1) return `${gb.toFixed(1)} GB`
-    const mb = bytes / (1024 ** 2)
+    const gb = bytes / 1024 ** 3
+    if (gb >= 1) return `${gb.toFixed(2)} GB`
+    const mb = bytes / 1024 ** 2
     return `${mb.toFixed(0)} MB`
   }
 
+  const handleSelectFolder = async () => {
+    const folderPath = await window.electron.selectFolder()
+    if (!folderPath) return
+    const parts = folderPath.replace(/\\/g, '/').split('/')
+    const folderName = parts[parts.length - 1] || folderPath
+    onDriveClick({
+      name: folderName,
+      letter: folderPath,
+      label: folderPath,
+      totalSpace: 0,
+      freeSpace: 0,
+      usedSpace: 0,
+      usedPercentage: 0,
+      isBitlocker: false,
+      isLocked: false,
+      filesystem: 'Folder',
+    })
+  }
+
+  const makeQuickAccessDrive = (name: string, folderPath: string): DriveInfo => ({
+    name,
+    letter: folderPath,
+    label: folderPath,
+    totalSpace: 0,
+    freeSpace: 0,
+    usedSpace: 0,
+    usedPercentage: 0,
+    isBitlocker: false,
+    isLocked: false,
+    filesystem: 'Folder',
+  })
+
+  const SectionHeader = ({ title, count }: { title: string; count?: number }) => (
+    <div className="flex items-center gap-2 mb-4">
+      <h2 className="text-sm font-semibold text-blue-500 tracking-wide">
+        {title}
+        {count !== undefined && (
+          <span className="text-blue-400 font-normal">({count})</span>
+        )}
+      </h2>
+      <div className="flex-1 h-px bg-blue-100/60" />
+    </div>
+  )
+
   return (
-    <div className="flex-1 relative overflow-hidden">
-      {/* Content */}
-      <div className="relative h-full flex flex-col items-center justify-center px-12 pt-24 pb-16">
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-4xl mx-auto px-10 pt-24 pb-16">
         {/* Main heading */}
-        <h1 className="text-5xl font-light text-gray-400 mb-20">
-          Select a drive to scan
+        <h1 className="text-4xl font-light text-gray-400 mb-10 text-center">
+          Select a location to recover files
         </h1>
-        
-        {/* Drives Grid */}
-        <div className="w-full max-w-5xl">
-          {loading ? (
-            <div className="flex flex-col items-center gap-4">
-              <div className="w-10 h-10 border-4 border-purple-300 border-t-purple-600 rounded-full animate-spin"></div>
-              <p className="text-gray-400">Detecting drives...</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-4 gap-5">
-              {drives.map((drive) => (
-                <button
-                  key={drive.name}
-                  onClick={() => onDriveClick(drive)}
-                  className="group relative bg-white/50 backdrop-blur-md rounded-[2rem] p-6 hover:bg-white/70 hover:scale-[1.02] transition-all duration-200 shadow-sm hover:shadow-md flex flex-col items-start justify-between h-36"
-                >
-                  <div className="flex items-center justify-between w-full">
-                    <div className="text-gray-400 group-hover:text-purple-500 transition-colors">
-                      <HardDrive size={24} />
+
+        {loading ? (
+          <div className="flex flex-col items-center gap-4 py-20">
+            <div className="w-10 h-10 border-4 border-purple-300 border-t-purple-600 rounded-full animate-spin" />
+            <p className="text-gray-400 text-sm">Detecting drives...</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-8">
+            {/* â”€â”€ Hard Disk Drives â”€â”€ */}
+            <section>
+              <SectionHeader title="Hard Disk Drives" count={drives.length} />
+              <div className="grid grid-cols-3 gap-4">
+                {drives.map((drive) => (
+                  <button
+                    key={drive.name}
+                    onClick={() => onDriveClick(drive)}
+                    className="group bg-white/55 backdrop-blur-md rounded-2xl p-4 hover:bg-white/75 hover:scale-[1.02] transition-all duration-200 shadow-sm hover:shadow-md flex items-center gap-4 text-left"
+                  >
+                    {/* HDD icon */}
+                    <div className="shrink-0 w-12 h-12 rounded-xl bg-blue-50/80 flex items-center justify-center group-hover:bg-blue-100/80 transition-colors">
+                      <HardDrive size={24} className="text-blue-400 group-hover:text-blue-500" />
                     </div>
-                    <div className="flex items-center gap-1">
-                      {drive.isBitlocker && (
-                        <Lock size={14} className="text-yellow-500" />
-                      )}
-                      {drive.filesystem !== 'Unknown' && (
-                        <span className="text-[10px] text-gray-400 bg-gray-100/60 px-1.5 py-0.5 rounded-md">
-                          {drive.filesystem}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="w-full">
-                    <p className="text-lg font-semibold text-gray-700 group-hover:text-gray-900 transition-colors text-left mb-0.5">
-                      {drive.name}: <span className="text-sm font-normal text-gray-400">{drive.label}</span>
-                    </p>
-                    <p className="text-xs text-gray-500 group-hover:text-gray-700 transition-colors text-left">
-                      {drive.totalSpace > 0 ? `${formatBytes(drive.freeSpace)} free of ${formatBytes(drive.totalSpace)}` : 'N/A'}
-                    </p>
-                    {drive.totalSpace > 0 && (
-                      <div className="mt-2 w-full bg-gray-200/50 rounded-full h-1.5">
-                        <div 
-                          className={`h-1.5 rounded-full transition-all ${
-                            drive.usedPercentage > 90 ? 'bg-red-400' : 
-                            drive.usedPercentage > 70 ? 'bg-yellow-400' :
-                            'bg-gradient-to-r from-blue-400 to-purple-500'
-                          }`}
-                          style={{ width: `${drive.usedPercentage}%` }}
-                        ></div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <p className="text-sm font-semibold text-gray-700 truncate">
+                          {drive.label || 'Local Disk'}({drive.name}:)
+                        </p>
+                        {drive.isBitlocker && (
+                          <Lock size={12} className="shrink-0 text-yellow-500" />
+                        )}
                       </div>
-                    )}
+
+                      {drive.totalSpace > 0 ? (
+                        <>
+                          {/* Usage bar */}
+                          <div className="w-full bg-gray-200/60 rounded-full h-1.5 mb-1">
+                            <div
+                              className={`h-1.5 rounded-full transition-all ${
+                                drive.usedPercentage > 90
+                                  ? 'bg-red-400'
+                                  : drive.usedPercentage > 70
+                                  ? 'bg-yellow-400'
+                                  : 'bg-gradient-to-r from-blue-400 to-blue-500'
+                              }`}
+                              style={{ width: `${drive.usedPercentage}%` }}
+                            />
+                          </div>
+                          <p className="text-[11px] text-gray-400">
+                            {formatBytes(drive.freeSpace)} / {formatBytes(drive.totalSpace)}
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-[11px] text-gray-400">{drive.filesystem}</p>
+                      )}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            {/* â”€â”€ Quick Access â”€â”€ */}
+            <section>
+              <SectionHeader title="Quick Access" count={3} />
+              <div className="grid grid-cols-3 gap-4">
+                {/* Desktop */}
+                <button
+                  onClick={() =>
+                    specialFolders && onDriveClick(makeQuickAccessDrive('Desktop', specialFolders.desktop))
+                  }
+                  disabled={!specialFolders}
+                  className="group bg-white/55 backdrop-blur-md rounded-2xl p-4 hover:bg-white/75 hover:scale-[1.02] transition-all duration-200 shadow-sm hover:shadow-md flex items-center gap-4 text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="shrink-0 w-12 h-12 rounded-xl bg-purple-50/80 flex items-center justify-center group-hover:bg-purple-100/80 transition-colors">
+                    <Monitor size={24} className="text-purple-400 group-hover:text-purple-500" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-700">Desktop</p>
+                    <p className="text-[11px] text-gray-400 truncate max-w-[140px]">
+                      {specialFolders?.desktop || 'Loading...'}
+                    </p>
                   </div>
                 </button>
-              ))}
-            </div>
-          )}
-        </div>
-        
-        {/* Voice input hint */}
-        <div className="absolute bottom-12 right-16 flex items-center gap-3 text-gray-400 text-sm">
-          <span>Press and hold</span>
-          <kbd className="px-3 py-1.5 bg-white/50 backdrop-blur-sm rounded-xl text-gray-500 font-medium text-xs">
-            S
-          </kbd>
-          <span>to speak</span>
-          <Mic size={18} className="text-gray-400" />
-        </div>
+
+                {/* Downloads */}
+                <button
+                  onClick={() =>
+                    specialFolders && onDriveClick(makeQuickAccessDrive('Downloads', specialFolders.downloads))
+                  }
+                  disabled={!specialFolders}
+                  className="group bg-white/55 backdrop-blur-md rounded-2xl p-4 hover:bg-white/75 hover:scale-[1.02] transition-all duration-200 shadow-sm hover:shadow-md flex items-center gap-4 text-left disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="shrink-0 w-12 h-12 rounded-xl bg-green-50/80 flex items-center justify-center group-hover:bg-green-100/80 transition-colors">
+                    <Download size={24} className="text-green-500 group-hover:text-green-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-700">Downloads</p>
+                    <p className="text-[11px] text-gray-400 truncate max-w-[140px]">
+                      {specialFolders?.downloads || 'Loading...'}
+                    </p>
+                  </div>
+                </button>
+
+                {/* Select Folder */}
+                <button
+                  onClick={handleSelectFolder}
+                  className="group bg-white/55 backdrop-blur-md rounded-2xl p-4 hover:bg-white/75 hover:scale-[1.02] transition-all duration-200 shadow-sm hover:shadow-md flex items-center gap-4 text-left border-2 border-dashed border-gray-200/80 hover:border-purple-300"
+                >
+                  <div className="shrink-0 w-12 h-12 rounded-xl bg-orange-50/80 flex items-center justify-center group-hover:bg-orange-100/80 transition-colors">
+                    <FolderOpen size={24} className="text-orange-400 group-hover:text-orange-500" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-700">Select Folder</p>
+                    <p className="text-[11px] text-gray-400">Browse for a folder</p>
+                  </div>
+                </button>
+              </div>
+            </section>
+          </div>
+        )}
       </div>
     </div>
   )

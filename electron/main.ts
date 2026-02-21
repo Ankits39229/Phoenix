@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import * as path from 'path';
 import * as os from 'os';
 import { execSync, spawn, ChildProcess } from 'child_process';
@@ -220,6 +220,24 @@ ipcMain.on('cancel-scan', () => {
 });
 
 // Check admin status
+ipcMain.handle('select-folder', async () => {
+  if (!mainWindow) return null;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openDirectory'],
+    title: 'Select a folder to scan',
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.handle('get-special-folders', async () => {
+  const home = os.homedir();
+  return {
+    desktop: path.join(home, 'Desktop'),
+    downloads: path.join(home, 'Downloads'),
+  };
+});
+
 ipcMain.handle('check-admin', async () => {
   try {
     const backendPath = getRustBackendPath();

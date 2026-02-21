@@ -63,6 +63,8 @@ declare global {
       cancelScan: () => void
       checkAdmin: () => Promise<{ is_admin: boolean; message: string }>
       onScanProgress: (callback: (data: ScanProgress) => void) => () => void
+      selectFolder: () => Promise<string | null>
+      getSpecialFolders: () => Promise<{ desktop: string; downloads: string }>
     }
   }
 }

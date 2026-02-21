@@ -13,4 +13,6 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.on('scan-progress', (_event, data) => callback(data));
     return () => ipcRenderer.removeAllListeners('scan-progress');
   },
+  selectFolder: () => ipcRenderer.invoke('select-folder'),
+  getSpecialFolders: () => ipcRenderer.invoke('get-special-folders'),
 });
