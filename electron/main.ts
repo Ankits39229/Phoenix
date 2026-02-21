@@ -53,19 +53,22 @@ function stripMeta(r: any) {
   };
 }
 
-// Paginated file fetch — renderer calls this instead of holding all file objects
-ipcMain.handle('get-files-page', (_event, opts: {
+// ── Shared filter helper ───────────────────────────────────────────────────────
+interface FilterOpts {
   driveLetter: string;
   category: string | null;
   search: string;
-  page: number;
-  pageSize: number;
-}) => {
-  if (!lastScanResult) return { files: [], total: 0, counts: {}, startIndex: 0 };
-  const { driveLetter, category, search, page, pageSize } = opts;
+  deletedOnly?: boolean;
+  minRecovery?: number;
+  folderPath?: string | null;
+}
+function getFilteredFiles(opts: FilterOpts): any[] {
+  if (!lastScanResult) return [];
+  const { driveLetter, category, search, deletedOnly, minRecovery, folderPath } = opts;
 
-  // Folder filter
-  const folderFilter = driveLetter.length > 2
+  const activeFolderFilter = folderPath
+    ? folderPath.replace(/\\/g, '/').toLowerCase()
+    : driveLetter.length > 2
     ? driveLetter.replace(/\\/g, '/').toLowerCase()
     : null;
 
@@ -75,24 +78,15 @@ ipcMain.handle('get-files-page', (_event, opts: {
     ...(lastScanResult.orphan_files || []),
   ];
 
-  const folderFiltered = folderFilter
+  let filtered = activeFolderFilter
     ? raw.filter((f) => {
         if (f.is_deleted) return true;
         const fp = (f.path || '').replace(/\\/g, '/').toLowerCase();
         if (fp.includes('$recycle.bin')) return true;
-        return fp.startsWith(folderFilter);
+        return fp.startsWith(activeFolderFilter);
       })
     : raw;
 
-  // Category counts (folder-filtered, no search/category filter)
-  const counts: Record<string, number> = {};
-  for (const f of folderFiltered) {
-    const cat = fileCat(f);
-    counts[cat] = (counts[cat] || 0) + 1;
-  }
-
-  // Apply category + search filters
-  let filtered = folderFiltered;
   if (category) filtered = filtered.filter((f) => fileCat(f) === category);
   if (search.trim()) {
     const q = search.toLowerCase();
@@ -102,13 +96,132 @@ ipcMain.handle('get-files-page', (_event, opts: {
       f.extension?.toLowerCase().includes(q)
     );
   }
+  if (deletedOnly) filtered = filtered.filter((f) => f.is_deleted);
+  if (minRecovery && minRecovery > 0) filtered = filtered.filter((f) => (f.recovery_chance || 0) >= minRecovery);
 
+  return filtered;
+}
+
+// Paginated file fetch — renderer calls this instead of holding all file objects
+ipcMain.handle('get-files-page', (_event, opts: {
+  driveLetter: string;
+  category: string | null;
+  search: string;
+  page: number;
+  pageSize: number;
+  deletedOnly?: boolean;
+  minRecovery?: number;
+  folderPath?: string | null;
+}) => {
+  if (!lastScanResult) return { files: [], total: 0, counts: {}, startIndex: 0 };
+  const { page, pageSize } = opts;
+
+  // Category counts use folder filter only (no category/search/deleted filter applied)
+  const folderCounted = getFilteredFiles({ ...opts, category: null, search: '', deletedOnly: false, minRecovery: 0 });
+  const counts: Record<string, number> = {};
+  for (const f of folderCounted) {
+    const cat = fileCat(f);
+    counts[cat] = (counts[cat] || 0) + 1;
+  }
+
+  const filtered = getFilteredFiles(opts);
   const total = filtered.length;
-  // pageSize <= 0 means return everything (used for recovery)
   const start = pageSize > 0 ? (page - 1) * pageSize : 0;
   const files = pageSize > 0 ? filtered.slice(start, start + pageSize) : filtered;
 
   return { files, total, counts, startIndex: start };
+});
+
+// Folder tree — returns unique parent folders sorted by file count
+ipcMain.handle('get-folder-tree', (_event, _driveLetter: string) => {
+  if (!lastScanResult) return [];
+  const raw: any[] = [
+    ...(lastScanResult.mft_entries || []),
+    ...(lastScanResult.carved_files || []),
+    ...(lastScanResult.orphan_files || []),
+  ];
+  const counts: Record<string, number> = {};
+  for (const f of raw) {
+    const p = (f.path || '').replace(/\\/g, '/');
+    const idx = p.lastIndexOf('/');
+    if (idx > 0) {
+      const folder = p.substring(0, idx);
+      counts[folder] = (counts[folder] || 0) + 1;
+    }
+  }
+  return Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 150)
+    .map(([folderPath, count]) => {
+      const parts = folderPath.split('/');
+      return { path: folderPath, name: parts[parts.length - 1] || folderPath, count };
+    });
+});
+
+// Recover all files matching filter — avoids sending large file arrays to renderer
+ipcMain.handle('recover-files-filtered', async (_event, opts: {
+  driveLetter: string;
+  category: string | null;
+  search: string;
+  deletedOnly?: boolean;
+  minRecovery?: number;
+  folderPath?: string | null;
+  destFolder: string;
+}) => {
+  const { destFolder } = opts;
+  const files = getFilteredFiles(opts);
+  const backendPath = getRustBackendPath();
+  const driveArg = opts.driveLetter.length > 2
+    ? opts.driveLetter.charAt(0).toUpperCase()
+    : opts.driveLetter.replace(':', '').toUpperCase();
+  const { existsSync } = require('fs');
+  const results: any[] = [];
+
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    if (mainWindow) {
+      mainWindow.webContents.send('recover-progress', {
+        current: i + 1,
+        total: files.length,
+        fileName: file.name || '',
+        percent: Math.round((i / files.length) * 100),
+      });
+    }
+    await new Promise<void>((resolve) => {
+      const fileJson = JSON.stringify(file);
+      const rawName: string = file.name || `recovered_file_${i + 1}`;
+      const safeName = rawName.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
+      let destFilePath = path.join(destFolder, safeName);
+      if (existsSync(destFilePath)) {
+        const ext = path.extname(safeName);
+        const base = path.basename(safeName, ext);
+        destFilePath = path.join(destFolder, `${base}_recovered_${i + 1}${ext}`);
+      }
+      const proc = spawn(backendPath, ['recover-deleted', driveArg, fileJson, destFilePath]);
+      let stdout = '';
+      let stderr = '';
+      proc.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
+      proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
+      proc.on('close', () => {
+        try { results.push({ name: file.name, ...JSON.parse(stdout.trim()) }); }
+        catch { results.push({ name: file.name, success: false, message: stderr.trim() || 'Unknown error', bytes_recovered: 0 }); }
+        resolve();
+      });
+      proc.on('error', (err: Error) => {
+        results.push({ name: file.name, success: false, message: err.message, bytes_recovered: 0 });
+        resolve();
+      });
+    });
+  }
+  if (mainWindow) {
+    mainWindow.webContents.send('recover-progress', { current: files.length, total: files.length, fileName: '', percent: 100 });
+  }
+  return {
+    recovered: results.filter((r) => r.success).length,
+    failed: results.filter((r) => !r.success).length,
+    total: files.length,
+    results,
+  };
 });
 
 // Check if we're in development mode

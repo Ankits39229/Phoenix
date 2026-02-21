@@ -25,7 +25,20 @@ contextBridge.exposeInMainWorld('electron', {
     search: string;
     page: number;
     pageSize: number;
+    deletedOnly?: boolean;
+    minRecovery?: number;
+    folderPath?: string | null;
   }) => ipcRenderer.invoke('get-files-page', opts),
+  getFolderTree: (driveLetter: string) => ipcRenderer.invoke('get-folder-tree', driveLetter),
+  recoverFilesFiltered: (opts: {
+    driveLetter: string;
+    category: string | null;
+    search: string;
+    deletedOnly?: boolean;
+    minRecovery?: number;
+    folderPath?: string | null;
+    destFolder: string;
+  }) => ipcRenderer.invoke('recover-files-filtered', opts),
   onRecoverProgress: (callback: (data: any) => void) => {
     ipcRenderer.on('recover-progress', (_event, data) => callback(data));
     return () => ipcRenderer.removeAllListeners('recover-progress');

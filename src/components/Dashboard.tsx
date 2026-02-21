@@ -8,27 +8,30 @@ interface DashboardProps {
 const Dashboard = ({ onDriveClick }: DashboardProps) => {
   const [drives, setDrives] = useState<DriveInfo[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [specialFolders, setSpecialFolders] = useState<{ desktop: string; downloads: string } | null>(null)
 
-  useEffect(() => {
-    const init = async () => {
-      try {
-        if (window.electron?.getDrives) {
-          const [driveData, folders] = await Promise.all([
-            window.electron.getDrives(),
-            window.electron.getSpecialFolders(),
-          ])
-          setDrives(driveData)
-          setSpecialFolders(folders)
-        }
-      } catch (error) {
-        console.error('Error during init:', error)
-      } finally {
-        setLoading(false)
+  const init = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      if (window.electron?.getDrives) {
+        const [driveData, folders] = await Promise.all([
+          window.electron.getDrives(),
+          window.electron.getSpecialFolders(),
+        ])
+        setDrives(driveData)
+        setSpecialFolders(folders)
       }
+    } catch (err) {
+      console.error('Error during init:', err)
+      setError(err instanceof Error ? err.message : 'Failed to detect drives.')
+    } finally {
+      setLoading(false)
     }
-    init()
-  }, [])
+  }
+
+  useEffect(() => { init() }, [])
 
   const formatBytes = (bytes: number) => {
     if (bytes === 0) return '0 GB'
@@ -95,12 +98,32 @@ const Dashboard = ({ onDriveClick }: DashboardProps) => {
             <div className="w-10 h-10 border-4 border-purple-300 border-t-purple-600 rounded-full animate-spin" />
             <p className="text-gray-400 text-sm">Detecting drives...</p>
           </div>
+        ) : error ? (
+          <div className="flex flex-col items-center gap-4 py-20">
+            <div className="w-full max-w-md bg-red-50 border border-red-200 rounded-2xl px-6 py-5 flex flex-col items-center gap-3 text-center">
+              <p className="text-sm font-semibold text-red-600">Could not detect drives</p>
+              <p className="text-xs text-red-400">{error}</p>
+              <button
+                onClick={init}
+                className="mt-1 px-4 py-1.5 rounded-lg bg-red-500 text-white text-xs font-semibold hover:bg-red-600 transition-colors"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
         ) : (
           <div className="flex flex-col gap-8">
             {/* â”€â”€ Hard Disk Drives â”€â”€ */}
             <section>
               <SectionHeader title="Hard Disk Drives" count={drives.length} />
               <div className="grid grid-cols-3 gap-4">
+                {drives.length === 0 && (
+                  <div className="col-span-3 py-8 flex flex-col items-center gap-2 text-center">
+                    <HardDrive size={28} className="text-gray-300" />
+                    <p className="text-sm text-gray-400">No drives detected.</p>
+                    <button onClick={init} className="text-xs text-blue-400 hover:text-blue-600 underline">Retry</button>
+                  </div>
+                )}
                 {drives.map((drive) => (
                   <button
                     key={drive.name}
@@ -115,7 +138,7 @@ const Dashboard = ({ onDriveClick }: DashboardProps) => {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5 mb-0.5">
                         <p className="text-sm font-semibold text-gray-700 truncate">
-                          {drive.label || 'Local Disk'}({drive.name}:)
+                          {drive.label || 'Local Disk'} ({drive.name}:)
                         </p>
                         {drive.isBitlocker && (
                           <Lock size={12} className="shrink-0 text-yellow-500" />
@@ -152,7 +175,7 @@ const Dashboard = ({ onDriveClick }: DashboardProps) => {
 
             {/* â”€â”€ Quick Access â”€â”€ */}
             <section>
-              <SectionHeader title="Quick Access" count={3} />
+              <SectionHeader title="Quick Access" />
               <div className="grid grid-cols-3 gap-4">
                 {/* Desktop */}
                 <button

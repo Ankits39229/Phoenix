@@ -1,6 +1,5 @@
 ﻿import { useEffect, useState, useRef, useMemo, useCallback, memo } from 'react'
 import {
-  ChevronLeft,
   ChevronRight,
   LayoutGrid,
   List,
@@ -19,11 +18,11 @@ import {
   File,
   Gamepad2,
   FileCode,
-  Pause,
   Square,
   CheckCircle,
   XCircle,
   FolderInput,
+  X,
 } from 'lucide-react'
 
 // â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -66,6 +65,21 @@ const CATEGORIES: {
   { name: 'Unsaved',  icon: <FileCode size={16} />, exts: [] },
   { name: 'Game',     icon: <Gamepad2 size={16} />, exts: ['pak','unity3d','big','bsa','esm','esp','gcf','vpk'] },
 ]
+
+// Large icons for card thumbnails (component refs so size can be set per context)
+const CAT_ICON_LG: Record<FileCategory, React.ReactNode> = {
+  Photo:    <Image size={32} />,
+  Video:    <Video size={32} />,
+  Audio:    <Music size={32} />,
+  Document: <FileText size={32} />,
+  Email:    <Mail size={32} />,
+  Database: <Database size={32} />,
+  Webfiles: <Globe size={32} />,
+  Archive:  <Archive size={32} />,
+  Others:   <File size={32} />,
+  Unsaved:  <FileCode size={32} />,
+  Game:     <Gamepad2 size={32} />,
+}
 
 // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const formatBytes = (bytes: number): string => {
@@ -143,7 +157,6 @@ const FileCard = memo(function FileCard({
   file, checked, onToggle,
 }: { file: RecoverableFile; checked: boolean; onToggle: () => void }) {
   const cat = useMemo(() => getCategory(file), [file.extension])
-  const catCfg = useMemo(() => CATEGORIES.find((c) => c.name === cat)!, [cat])
 
   const ext = (file.extension || '').toLowerCase().replace(/^\./, '')
   const canPreview = !file.is_deleted && IMG_PREVIEW_EXTS.has(ext) && !!file.path
@@ -170,7 +183,7 @@ const FileCard = memo(function FileCard({
         </div>
       ) : (
         <div className={`h-20 flex items-center justify-center ${THUMB[cat]}`}>
-          <div className="opacity-70 scale-150">{catCfg.icon}</div>
+          {CAT_ICON_LG[cat]}
         </div>
       )}
 
@@ -223,6 +236,15 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
   const [page, setPage] = useState(1)
   const PAGE_SIZE = 60
 
+  // Filter panel
+  const [showFilterPanel, setShowFilterPanel] = useState(false)
+  const [filterDeletedOnly, setFilterDeletedOnly] = useState(false)
+  const [filterMinRecovery, setFilterMinRecovery] = useState(0)
+
+  // File Location sidebar
+  const [folderTree, setFolderTree] = useState<{ path: string; name: string; count: number }[]>([])
+  const [sidebarFolderPath, setSidebarFolderPath] = useState<string | null>(null)
+
   // Debounced search — only re-filter after user stops typing for 200ms
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -248,48 +270,43 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
   const [recoverState, setRecoverState] = useState<RecoverState | null>(null)
 
   const handleRecover = async () => {
-    // Build list: selected file objects OR all matching files from main process
-    let filesToRecover: RecoverableFile[]
     if (selectedIds.size > 0) {
-      filesToRecover = Array.from(selectedFiles.values())
-    } else {
-      // Fetch all matching files (no pagination) for "recover all"
-      const all = await window.electron.getFilesPage({
-        driveLetter: drive.letter,
-        category: selectedCategory,
-        search: debouncedSearch,
-        page: 1,
-        pageSize: -1,
+      // Recover only selected files — safe, renderer already holds these objects
+      const filesToRecover = Array.from(selectedFiles.values())
+      if (filesToRecover.length === 0) return
+      const destFolder = await window.electron.selectFolder()
+      if (!destFolder) return
+      setRecoverState({ phase: 'recovering', current: 0, total: filesToRecover.length, fileName: '', percent: 0, destFolder })
+      const cleanup = window.electron.onRecoverProgress((data) => {
+        setRecoverState((prev) => prev ? { ...prev, current: data.current, fileName: data.fileName, percent: data.percent } : null)
       })
-      filesToRecover = all.files
-    }
-    if (filesToRecover.length === 0) return
-
-    const destFolder = await window.electron.selectFolder()
-    if (!destFolder) return
-
-    setRecoverState({ phase: 'recovering', current: 0, total: filesToRecover.length, fileName: '', percent: 0, destFolder })
-
-    const cleanup = window.electron.onRecoverProgress((data) => {
-      setRecoverState((prev) =>
-        prev ? { ...prev, current: data.current, fileName: data.fileName, percent: data.percent } : null
-      )
-    })
-
-    try {
-      const res = await window.electron.recoverFiles(drive.letter, filesToRecover, destFolder)
-      cleanup()
-      setRecoverState((prev) =>
-        prev ? { ...prev, phase: 'done', recovered: res.recovered, failed: res.failed, results: res.results, percent: 100 } : null
-      )
-    } catch {
-      cleanup()
-      setRecoverState(null)
+      try {
+        const res = await window.electron.recoverFiles(drive.letter, filesToRecover, destFolder)
+        cleanup()
+        setRecoverState((prev) => prev ? { ...prev, phase: 'done', recovered: res.recovered, failed: res.failed, results: res.results, percent: 100 } : null)
+      } catch { cleanup(); setRecoverState(null) }
+    } else {
+      // Recover All — pass filter params to main process; no file array loaded into renderer
+      if (pageResult.total === 0) return
+      const destFolder = await window.electron.selectFolder()
+      if (!destFolder) return
+      setRecoverState({ phase: 'recovering', current: 0, total: pageResult.total, fileName: '', percent: 0, destFolder })
+      const cleanup = window.electron.onRecoverProgress((data) => {
+        setRecoverState((prev) => prev ? { ...prev, current: data.current, fileName: data.fileName, percent: data.percent } : null)
+      })
+      try {
+        const res = await window.electron.recoverFilesFiltered({
+          driveLetter: drive.letter, category: selectedCategory, search: debouncedSearch,
+          deletedOnly: filterDeletedOnly, minRecovery: filterMinRecovery,
+          folderPath: sidebarFolderPath, destFolder,
+        })
+        cleanup()
+        setRecoverState((prev) => prev ? { ...prev, phase: 'done', recovered: res.recovered, failed: res.failed, results: res.results, percent: 100 } : null)
+      } catch { cleanup(); setRecoverState(null) }
     }
   }
 
   const scanStarted = useRef(false)
-  const isPaused = useRef(false)
 
   // â”€â”€ Start scan on mount â”€â”€
   useEffect(() => {
@@ -320,8 +337,14 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
   // ── Track actual file objects for recovery across page changes ───────────────
   const [selectedFiles, setSelectedFiles] = useState<Map<string, RecoverableFile>>(new Map())
 
-  // Reset page when category or search changes
-  useEffect(() => { setPage(1) }, [selectedCategory, debouncedSearch])
+  // Reset page when any filter changes
+  useEffect(() => { setPage(1) }, [selectedCategory, debouncedSearch, filterDeletedOnly, filterMinRecovery, sidebarFolderPath])
+
+  // Fetch folder tree once scan finishes
+  useEffect(() => {
+    if (!result?.success) return
+    window.electron.getFolderTree(drive.letter).then(setFolderTree)
+  }, [result?.success, drive.letter])
 
   // Fetch a page whenever filters or page number changes
   useEffect(() => {
@@ -332,29 +355,16 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
       search: debouncedSearch,
       page,
       pageSize: PAGE_SIZE,
+      deletedOnly: filterDeletedOnly,
+      minRecovery: filterMinRecovery,
+      folderPath: sidebarFolderPath,
     }).then(setPageResult)
-  }, [result?.success, drive.letter, selectedCategory, debouncedSearch, page, PAGE_SIZE])
+  }, [result?.success, drive.letter, selectedCategory, debouncedSearch, page, PAGE_SIZE, filterDeletedOnly, filterMinRecovery, sidebarFolderPath])
 
   const pagedFiles = pageResult.files
   const categoryCounts = pageResult.counts as Record<FileCategory, number>
-
-  // â”€â”€ Category counts â”€â”€
-  // ── All files (flat, folder-filtered) ──────────────────────────────────────
   const totalSize = result?.total_recoverable_size || 0
 
-  // ── Category counts ──────────────────────────────────────────────────────────
-  
-
-  // ── Filtered display files ───────────────────────────────────────────────────
-  
-
-  // ── Reset page when filter changes ──────────────────────────────────────────
-  
-
-  // ── Paged slice ──────────────────────────────────────────────────────────────
-  
-
-  // â”€â”€ Filtered display files â”€â”€
   const isScanning = progress.status === 'scanning'
   const pct = progress.progress ?? 0
 
@@ -417,13 +427,6 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
 
         <div className="w-px h-4 bg-gray-200" />
 
-        <button className="p-1 rounded-lg hover:bg-gray-100/60 text-gray-400 hover:text-gray-600 transition-colors">
-          <ChevronLeft size={14} />
-        </button>
-        <button className="p-1 rounded-lg hover:bg-gray-100/60 text-gray-400 hover:text-gray-600 transition-colors">
-          <ChevronRight size={14} />
-        </button>
-
         {/* Breadcrumb */}
         <div className="flex items-center gap-1 text-sm text-gray-500 flex-1">
           <span className="hover:text-blue-500 cursor-pointer transition-colors">{drive.name}:</span>
@@ -458,10 +461,53 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
 
         <div className="w-px h-4 bg-gray-200" />
 
-        <button className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 bg-gray-100/60 hover:bg-gray-100 rounded-lg px-2.5 py-1.5 transition-all">
-          <SlidersHorizontal size={12} />
-          Filter
-        </button>
+        <div className="relative">
+          <button
+            onClick={() => setShowFilterPanel((p) => !p)}
+            className={`flex items-center gap-1.5 text-xs rounded-lg px-2.5 py-1.5 transition-all ${
+              filterDeletedOnly || filterMinRecovery > 0
+                ? 'bg-blue-100 text-blue-600 hover:bg-blue-200'
+                : 'text-gray-500 hover:text-gray-700 bg-gray-100/60 hover:bg-gray-100'
+            }`}
+          >
+            <SlidersHorizontal size={12} />
+            Filter
+            {(filterDeletedOnly || filterMinRecovery > 0) && (
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+            )}
+          </button>
+          {showFilterPanel && (
+            <div className="absolute right-0 top-full mt-1 z-30 bg-white rounded-xl shadow-lg border border-gray-100 p-3 w-56 flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Filters</p>
+                <button onClick={() => setShowFilterPanel(false)} className="text-gray-400 hover:text-gray-600"><X size={12} /></button>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer select-none">
+                <input type="checkbox" checked={filterDeletedOnly}
+                  onChange={(e) => { setFilterDeletedOnly(e.target.checked); setPage(1) }}
+                  className="w-3 h-3 accent-blue-500"
+                />
+                <span className="text-xs text-gray-600">Deleted files only</span>
+              </label>
+              <div className="flex flex-col gap-1.5">
+                <p className="text-[11px] text-gray-500">Min. recovery chance</p>
+                <div className="flex gap-1">
+                  {[0, 50, 80].map((v) => (
+                    <button key={v} onClick={() => { setFilterMinRecovery(v); setPage(1) }}
+                      className={`flex-1 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                        filterMinRecovery === v ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                      }`}
+                    >{v === 0 ? 'Any' : `≥${v}%`}</button>
+                  ))}
+                </div>
+              </div>
+              {(filterDeletedOnly || filterMinRecovery > 0) && (
+                <button onClick={() => { setFilterDeletedOnly(false); setFilterMinRecovery(0); setPage(1) }}
+                  className="text-[11px] text-red-400 hover:text-red-600 text-left">Clear filters</button>
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="relative">
           <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -484,7 +530,12 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
             {(['location', 'type'] as SidebarTab[]).map((tab) => (
               <button
                 key={tab}
-                onClick={() => setSidebarTab(tab)}
+                onClick={() => {
+                  setSidebarTab(tab)
+                  // Clear the opposing filter so the two tabs act as independent modes
+                  if (tab === 'type') setSidebarFolderPath(null)
+                  if (tab === 'location') setSelectedCategory(null)
+                }}
                 className={`flex-1 py-2.5 text-xs font-semibold transition-all ${
                   sidebarTab === tab
                     ? 'text-blue-600 border-b-2 border-blue-500 bg-white/60'
@@ -523,12 +574,46 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
                 )
               })
             ) : (
-              <div className="flex flex-col items-center justify-center h-full py-12 gap-3">
-                <FolderOpen size={28} className="text-gray-300" />
-                <p className="text-xs text-gray-400 text-center px-4">
-                  {isScanning ? 'Building folder tree...' : 'Select a category to explore'}
-                </p>
-              </div>
+              folderTree.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full py-12 gap-3">
+                  <FolderOpen size={28} className="text-gray-300" />
+                  <p className="text-xs text-gray-400 text-center px-4">
+                    {isScanning ? 'Building folder tree...' : result?.success ? 'No folders found' : 'Run a scan to see folders'}
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {sidebarFolderPath && (
+                    <button
+                      onClick={() => { setSidebarFolderPath(null); setPage(1) }}
+                      className="w-full flex items-center gap-1.5 px-4 py-2 text-[11px] text-blue-500 hover:text-blue-700 bg-blue-50/60 border-b border-blue-100"
+                    >
+                      <X size={10} /> Clear folder filter
+                    </button>
+                  )}
+                  {folderTree.map((folder) => {
+                    const active = sidebarFolderPath === folder.path
+                    return (
+                      <button
+                        key={folder.path}
+                        onClick={() => { setSidebarFolderPath(active ? null : folder.path); setPage(1) }}
+                        title={folder.path}
+                        className={`w-full flex items-center justify-between px-4 py-2.5 text-sm transition-all group ${
+                          active ? 'bg-blue-50/80 text-blue-700' : 'hover:bg-white/60 text-gray-600'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <FolderOpen size={14} className={`shrink-0 ${active ? 'text-blue-500' : 'text-gray-400 group-hover:text-gray-600'}`} />
+                          <span className={`font-medium truncate ${active ? 'text-blue-700' : ''}`}>{folder.name}</span>
+                        </div>
+                        <span className={`text-xs tabular-nums shrink-0 ${active ? 'text-blue-500 font-semibold' : 'text-gray-400'}`}>
+                          {folder.count.toLocaleString()}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </>
+              )
             )}
           </div>
 
@@ -848,22 +933,13 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
 
         {/* Controls */}
         {isScanning && (
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => { isPaused.current = !isPaused.current }}
-              title="Pause"
-              className="p-1.5 rounded-lg bg-gray-100/80 hover:bg-gray-200/80 text-gray-500 hover:text-gray-700 transition-all"
-            >
-              <Pause size={14} />
-            </button>
-            <button
-              onClick={handleCancelBack}
-              title="Stop"
-              className="p-1.5 rounded-lg bg-gray-100/80 hover:bg-red-100 text-gray-500 hover:text-red-500 transition-all"
-            >
-              <Square size={14} />
-            </button>
-          </div>
+          <button
+            onClick={handleCancelBack}
+            title="Stop scan"
+            className="p-1.5 rounded-lg bg-gray-100/80 hover:bg-red-100 text-gray-500 hover:text-red-500 transition-all"
+          >
+            <Square size={14} />
+          </button>
         )}
         {!isScanning && (
           <button
@@ -874,9 +950,12 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
           </button>
         )}
 
-        {/* Recover button */}
+        {/* Recover button hint */}
         {result && result.success && !isScanning && selectedIds.size === 0 && pageResult.total > 0 && (
-          <span className="text-[11px] text-gray-400 italic">Select files to recover, or click to recover all</span>
+          <span className="flex items-center gap-1 text-xs font-medium text-blue-500 bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg">
+            No files selected — clicking Recover will restore all {pageResult.total.toLocaleString()}
+            <ChevronRight size={12} className="shrink-0" />
+          </span>
         )}
         <button
           onClick={handleRecover}

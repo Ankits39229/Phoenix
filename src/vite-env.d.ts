@@ -81,7 +81,25 @@ declare global {
         search: string
         page: number
         pageSize: number
+        deletedOnly?: boolean
+        minRecovery?: number
+        folderPath?: string | null
       }) => Promise<FilesPageResult>
+      getFolderTree: (driveLetter: string) => Promise<{ path: string; name: string; count: number }[]>
+      recoverFilesFiltered: (opts: {
+        driveLetter: string
+        category: string | null
+        search: string
+        deletedOnly?: boolean
+        minRecovery?: number
+        folderPath?: string | null
+        destFolder: string
+      }) => Promise<{
+        recovered: number
+        failed: number
+        total: number
+        results: Array<{ name: string; success: boolean; message?: string; bytes_recovered?: number }>
+      }>
       recoverFiles: (
         driveLetter: string,
         files: RecoverableFile[],
