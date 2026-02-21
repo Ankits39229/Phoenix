@@ -19,6 +19,13 @@ contextBridge.exposeInMainWorld('electron', {
   openFolder: (folderPath: string) => ipcRenderer.invoke('open-folder', folderPath),
   recoverFiles: (driveLetter: string, files: any[], destFolder: string) =>
     ipcRenderer.invoke('recover-files', driveLetter, files, destFolder),
+  getFilesPage: (opts: {
+    driveLetter: string;
+    category: string | null;
+    search: string;
+    page: number;
+    pageSize: number;
+  }) => ipcRenderer.invoke('get-files-page', opts),
   onRecoverProgress: (callback: (data: any) => void) => {
     ipcRenderer.on('recover-progress', (_event, data) => callback(data));
     return () => ipcRenderer.removeAllListeners('recover-progress');

@@ -6,6 +6,106 @@ import { execSync, spawn, ChildProcess } from 'child_process';
 let mainWindow: BrowserWindow | null = null;
 let scanProcess: ChildProcess | null = null;
 
+// ── Scan result cache – lives in main process so the renderer never holds the full array ──
+let lastScanResult: any = null;
+
+// Extension → category mapping (must match ScanView.tsx's getCategory)
+const EXT_CAT: Record<string, string> = {
+  jpg:'Photo',jpeg:'Photo',png:'Photo',gif:'Photo',bmp:'Photo',webp:'Photo',
+  tiff:'Photo',tif:'Photo',svg:'Photo',heic:'Photo',raw:'Photo',cr2:'Photo',
+  nef:'Photo',arw:'Photo',dng:'Photo',heif:'Photo',psd:'Photo',avif:'Photo',
+  mp4:'Video',avi:'Video',mov:'Video',mkv:'Video',wmv:'Video',flv:'Video',
+  webm:'Video',m4v:'Video','3gp':'Video',mpg:'Video',mpeg:'Video',ts:'Video',
+  mp3:'Audio',wav:'Audio',flac:'Audio',aac:'Audio',ogg:'Audio',wma:'Audio',
+  m4a:'Audio',opus:'Audio',aiff:'Audio',
+  pdf:'Document',doc:'Document',docx:'Document',txt:'Document',xls:'Document',
+  xlsx:'Document',ppt:'Document',pptx:'Document',odt:'Document',csv:'Document',
+  rtf:'Document',md:'Document',pages:'Document',numbers:'Document',key:'Document',
+  eml:'Email',msg:'Email',pst:'Email',ost:'Email',mbox:'Email',
+  db:'Database',sqlite:'Database',sql:'Database',mdf:'Database',accdb:'Database',mdb:'Database',
+  html:'Webfiles',htm:'Webfiles',css:'Webfiles',js:'Webfiles',php:'Webfiles',
+  xml:'Webfiles',json:'Webfiles',jsx:'Webfiles',tsx:'Webfiles',
+  zip:'Archive',rar:'Archive','7z':'Archive',tar:'Archive',gz:'Archive',
+  bz2:'Archive',xz:'Archive',cab:'Archive',iso:'Archive',
+};
+function fileCat(f: any): string {
+  const ext = (f.extension || '').toLowerCase().replace(/^\./, '');
+  return EXT_CAT[ext] || 'Others';
+}
+
+// Return scan result without the heavy file arrays
+function stripMeta(r: any) {
+  return {
+    success: r.success,
+    message: r.message,
+    scan_mode: r.scan_mode,
+    drive: r.drive,
+    total_files: r.total_files,
+    total_recoverable_size: r.total_recoverable_size,
+    scan_duration_ms: r.scan_duration_ms,
+    mft_records_scanned: r.mft_records_scanned,
+    requires_admin: r.requires_admin,
+  };
+}
+
+// Paginated file fetch — renderer calls this instead of holding all file objects
+ipcMain.handle('get-files-page', (_event, opts: {
+  driveLetter: string;
+  category: string | null;
+  search: string;
+  page: number;
+  pageSize: number;
+}) => {
+  if (!lastScanResult) return { files: [], total: 0, counts: {}, startIndex: 0 };
+  const { driveLetter, category, search, page, pageSize } = opts;
+
+  // Folder filter
+  const folderFilter = driveLetter.length > 2
+    ? driveLetter.replace(/\\/g, '/').toLowerCase()
+    : null;
+
+  const raw: any[] = [
+    ...(lastScanResult.mft_entries || []),
+    ...(lastScanResult.carved_files || []),
+    ...(lastScanResult.orphan_files || []),
+  ];
+
+  const folderFiltered = folderFilter
+    ? raw.filter((f) => {
+        if (f.is_deleted) return true;
+        const fp = (f.path || '').replace(/\\/g, '/').toLowerCase();
+        if (fp.includes('$recycle.bin')) return true;
+        return fp.startsWith(folderFilter);
+      })
+    : raw;
+
+  // Category counts (folder-filtered, no search/category filter)
+  const counts: Record<string, number> = {};
+  for (const f of folderFiltered) {
+    const cat = fileCat(f);
+    counts[cat] = (counts[cat] || 0) + 1;
+  }
+
+  // Apply category + search filters
+  let filtered = folderFiltered;
+  if (category) filtered = filtered.filter((f) => fileCat(f) === category);
+  if (search.trim()) {
+    const q = search.toLowerCase();
+    filtered = filtered.filter((f) =>
+      f.name?.toLowerCase().includes(q) ||
+      f.path?.toLowerCase().includes(q) ||
+      f.extension?.toLowerCase().includes(q)
+    );
+  }
+
+  const total = filtered.length;
+  // pageSize <= 0 means return everything (used for recovery)
+  const start = pageSize > 0 ? (page - 1) * pageSize : 0;
+  const files = pageSize > 0 ? filtered.slice(start, start + pageSize) : filtered;
+
+  return { files, total, counts, startIndex: start };
+});
+
 // Check if we're in development mode
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
@@ -172,6 +272,7 @@ ipcMain.handle('scan-drive', async (_event, driveLetter: string, mode: string = 
         if (code === 0 && stdout.trim()) {
           try {
             const result = JSON.parse(stdout.trim());
+            lastScanResult = result;
             if (mainWindow) {
               mainWindow.webContents.send('scan-progress', {
                 status: 'complete',
@@ -179,7 +280,8 @@ ipcMain.handle('scan-drive', async (_event, driveLetter: string, mode: string = 
                 progress: 100,
               });
             }
-            resolve(result);
+            // Resolve only metadata — file arrays stay in main process
+            resolve(stripMeta(result));
           } catch (parseError) {
             reject(new Error('Failed to parse scan results'));
           }
@@ -188,7 +290,8 @@ ipcMain.handle('scan-drive', async (_event, driveLetter: string, mode: string = 
           if (stdout.trim()) {
             try {
               const result = JSON.parse(stdout.trim());
-              resolve(result);
+              lastScanResult = result;
+              resolve(stripMeta(result));
             } catch (_e) {
               reject(new Error(stderr || 'Scan failed'));
             }

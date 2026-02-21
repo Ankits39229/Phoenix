@@ -46,10 +46,18 @@ declare global {
     total_recoverable_size: number
     scan_duration_ms: number
     mft_records_scanned: number
-    mft_entries: RecoverableFile[]
-    carved_files: RecoverableFile[]
-    orphan_files: RecoverableFile[]
     requires_admin: boolean
+    // file arrays omitted — they stay in the main process
+    mft_entries?: RecoverableFile[]
+    carved_files?: RecoverableFile[]
+    orphan_files?: RecoverableFile[]
+  }
+
+  interface FilesPageResult {
+    files: RecoverableFile[]
+    total: number
+    counts: Record<string, number>
+    startIndex: number
   }
 
   interface Window {
@@ -67,6 +75,13 @@ declare global {
       getSpecialFolders: () => Promise<{ desktop: string; downloads: string }>
       relunchAsAdmin: () => Promise<{ success: boolean; message?: string }>
       openFolder: (folderPath: string) => Promise<void>
+      getFilesPage: (opts: {
+        driveLetter: string
+        category: string | null
+        search: string
+        page: number
+        pageSize: number
+      }) => Promise<FilesPageResult>
       recoverFiles: (
         driveLetter: string,
         files: RecoverableFile[],

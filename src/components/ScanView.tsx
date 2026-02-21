@@ -1,4 +1,4 @@
-﻿import { useEffect, useState, useRef } from 'react'
+﻿import { useEffect, useState, useRef, useMemo, useCallback, memo } from 'react'
 import {
   ChevronLeft,
   ChevronRight,
@@ -129,11 +129,11 @@ const THUMB: Record<FileCategory, string> = {
 }
 
 // â”€â”€â”€ File Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-const FileCard = ({
+const FileCard = memo(function FileCard({
   file, checked, onToggle,
-}: { file: RecoverableFile; checked: boolean; onToggle: () => void }) => {
-  const cat = getCategory(file)
-  const catCfg = CATEGORIES.find((c) => c.name === cat)!
+}: { file: RecoverableFile; checked: boolean; onToggle: () => void }) {
+  const cat = useMemo(() => getCategory(file), [file.extension])
+  const catCfg = useMemo(() => CATEGORIES.find((c) => c.name === cat)!, [cat])
   return (
     <div
       className={`group relative rounded-xl overflow-hidden bg-white/60 backdrop-blur-sm shadow-sm hover:shadow-md transition-all flex flex-col cursor-pointer border-2 ${
@@ -172,7 +172,7 @@ const FileCard = ({
       </div>
     </div>
   )
-}
+})
 
 const ScanView = ({ drive, onBack }: ScanViewProps) => {
   const [progress, setProgress] = useState<ScanProgress>({
@@ -187,9 +187,20 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('type')
   const [selectedCategory, setSelectedCategory] = useState<FileCategory | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
-  const [searchQuery, setSearchQuery] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [relunchingAdmin, setRelunchingAdmin] = useState(false)
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 60
+
+  // Debounced search — only re-filter after user stops typing for 200ms
+  const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleSearchChange = useCallback((val: string) => {
+    setSearchQuery(val)
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    searchTimer.current = setTimeout(() => setDebouncedSearch(val), 200)
+  }, [])
 
   // ── Recovery state ──────────────────────────────────────────────────────────
   interface RecoverState {
@@ -206,11 +217,21 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
   const [recoverState, setRecoverState] = useState<RecoverState | null>(null)
 
   const handleRecover = async () => {
-    // Collect files to recover: selected ones, or all visible if none selected
-    const filesToRecover =
-      selectedIds.size > 0
-        ? displayFiles.filter((f, i) => selectedIds.has(f.id || String(i)))
-        : displayFiles
+    // Build list: selected file objects OR all matching files from main process
+    let filesToRecover: RecoverableFile[]
+    if (selectedIds.size > 0) {
+      filesToRecover = Array.from(selectedFiles.values())
+    } else {
+      // Fetch all matching files (no pagination) for "recover all"
+      const all = await window.electron.getFilesPage({
+        driveLetter: drive.letter,
+        category: selectedCategory,
+        search: debouncedSearch,
+        page: 1,
+        pageSize: -1,
+      })
+      filesToRecover = all.files
+    }
     if (filesToRecover.length === 0) return
 
     const destFolder = await window.electron.selectFolder()
@@ -261,57 +282,48 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
 
     return () => cleanup()
   }, [drive.letter])
-  // Folder filter: if drive.letter is a full path (e.g. Desktop), only show files within it.
-  // NOTE: deleted files lose their original path in the MFT (moved to $Recycle.Bin or path cleared),
-  // so we ALWAYS include deleted files — filtering only non-deleted ones by path.
-  const folderFilter = drive.letter.length > 2 ? drive.letter.replace(/\\/g, '/').toLowerCase() : null
-  const filterByFolder = (arr: RecoverableFile[]): RecoverableFile[] => {
-    if (!folderFilter) return arr
-    return arr.filter((f) => {
-      // Always show deleted files — their path is unreliable after deletion
-      if (f.is_deleted) return true
-      const fp = (f.path || '').replace(/\\/g, '/').toLowerCase()
-      // Also match files in $Recycle.Bin by original name heuristic
-      if (fp.includes('$recycle.bin')) return true
-      return fp.startsWith(folderFilter)
-    })
-  }
+
+  // ── Page result from main process (only current page lives in renderer) ─────
+  const [pageResult, setPageResult] = useState<FilesPageResult>({ files: [], total: 0, counts: {}, startIndex: 0 })
+
+  // ── Track actual file objects for recovery across page changes ───────────────
+  const [selectedFiles, setSelectedFiles] = useState<Map<string, RecoverableFile>>(new Map())
+
+  // Reset page when category or search changes
+  useEffect(() => { setPage(1) }, [selectedCategory, debouncedSearch])
+
+  // Fetch a page whenever filters or page number changes
+  useEffect(() => {
+    if (!result?.success) return
+    window.electron.getFilesPage({
+      driveLetter: drive.letter,
+      category: selectedCategory,
+      search: debouncedSearch,
+      page,
+      pageSize: PAGE_SIZE,
+    }).then(setPageResult)
+  }, [result?.success, drive.letter, selectedCategory, debouncedSearch, page, PAGE_SIZE])
+
+  const pagedFiles = pageResult.files
+  const categoryCounts = pageResult.counts as Record<FileCategory, number>
 
   // â”€â”€ Category counts â”€â”€
-  const categoryCounts = (() => {
-    if (!result) return {} as Record<FileCategory, number>
-    const all = filterByFolder([
-      ...(result.mft_entries || []),
-      ...(result.carved_files || []),
-      ...(result.orphan_files || []),
-    ])
-    const counts: Record<FileCategory, number> = {
-      Photo: 0, Video: 0, Audio: 0, Document: 0, Email: 0,
-      Database: 0, Webfiles: 0, Archive: 0, Others: 0, Unsaved: 0, Game: 0,
-    }
-    for (const f of all) counts[getCategory(f)]++
-    return counts
-  })()
+  // ── All files (flat, folder-filtered) ──────────────────────────────────────
+  const totalSize = result?.total_recoverable_size || 0
+
+  // ── Category counts ──────────────────────────────────────────────────────────
+  
+
+  // ── Filtered display files ───────────────────────────────────────────────────
+  
+
+  // ── Reset page when filter changes ──────────────────────────────────────────
+  
+
+  // ── Paged slice ──────────────────────────────────────────────────────────────
+  
 
   // â”€â”€ Filtered display files â”€â”€
-  const displayFiles = (() => {
-    if (!result) return []
-    let files: RecoverableFile[] = filterByFolder([
-      ...(result.mft_entries || []),
-      ...(result.carved_files || []),
-      ...(result.orphan_files || []),
-    ])
-    if (selectedCategory) files = files.filter((f) => getCategory(f) === selectedCategory)
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase()
-      files = files.filter(
-        (f) => f.name?.toLowerCase().includes(q) || f.path?.toLowerCase().includes(q) || f.extension?.toLowerCase().includes(q)
-      )
-    }
-    return files
-  })()
-
-  const totalSize = result?.total_recoverable_size || 0
   const isScanning = progress.status === 'scanning'
   const pct = progress.progress ?? 0
 
@@ -320,20 +332,43 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
     onBack()
   }
 
-  const toggleFile = (id: string) => {
+  const toggleFile = useCallback((id: string, file: RecoverableFile) => {
     setSelectedIds((prev) => {
       const next = new Set(prev)
       next.has(id) ? next.delete(id) : next.add(id)
       return next
     })
-  }
+    setSelectedFiles((prev) => {
+      const next = new Map(prev)
+      next.has(id) ? next.delete(id) : next.set(id, file)
+      return next
+    })
+  }, [])
 
-  const toggleAll = () => {
-    if (selectedIds.size === displayFiles.length) setSelectedIds(new Set())
-    else setSelectedIds(new Set(displayFiles.map((f, i) => f.id || String(i))))
-  }
+  const toggleAll = useCallback(() => {
+    const allPageIds = pagedFiles.map((f, i) => f.id || String(pageResult.startIndex + i))
+    const allOnPage = allPageIds.every((id) => selectedIds.has(id))
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (allOnPage) allPageIds.forEach((id) => next.delete(id))
+      else allPageIds.forEach((id) => next.add(id))
+      return next
+    })
+    setSelectedFiles((prev) => {
+      const next = new Map(prev)
+      if (allOnPage) {
+        allPageIds.forEach((id) => next.delete(id))
+      } else {
+        pagedFiles.forEach((f, i) => {
+          const id = f.id || String(pageResult.startIndex + i)
+          next.set(id, f)
+        })
+      }
+      return next
+    })
+  }, [pagedFiles, pageResult.startIndex, selectedIds])
 
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ────────────────────────────────────────────────────────────────────────────
   return (
     <div className="relative flex-1 flex flex-col overflow-hidden">
       {/* â”€â”€ Top Nav Bar â”€â”€ */}
@@ -403,7 +438,7 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
             type="text"
             placeholder="Search File"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
             className="pl-7 pr-3 py-1.5 bg-gray-100/60 rounded-lg text-xs text-gray-600 placeholder-gray-400 outline-none focus:bg-white/80 focus:ring-1 focus:ring-blue-300 transition-all w-36"
           />
         </div>
@@ -487,7 +522,7 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
             {result && result.success ? (
               <label className="flex items-center gap-2 cursor-pointer" onClick={toggleAll}>
                 <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-all ${
-                  selectedIds.size > 0 && selectedIds.size === displayFiles.length
+                  selectedIds.size > 0 && selectedIds.size === pageResult.total
                     ? 'bg-blue-500 border-blue-500'
                     : selectedIds.size > 0
                     ? 'bg-blue-200 border-blue-400'
@@ -496,7 +531,7 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
                   {selectedIds.size > 0 && (
                     <svg viewBox="0 0 12 12" fill="none" className="w-2.5 h-2.5">
                       <path
-                        d={selectedIds.size === displayFiles.length ? 'M2 6l3 3 5-5' : 'M2 6h8'}
+                        d={selectedIds.size === pageResult.total ? 'M2 6l3 3 5-5' : 'M2 6h8'}
                         stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
                       />
                     </svg>
@@ -512,7 +547,7 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
               </span>
             )}
             <span className="text-xs text-gray-400 tabular-nums">
-              {displayFiles.length.toLocaleString()} files{selectedCategory ? ` (${selectedCategory})` : ''}
+              {pageResult.total.toLocaleString()} files{selectedCategory ? ` (${selectedCategory})` : ''}
             </span>
           </div>
 
@@ -601,22 +636,27 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
             {/* Grid view */}
             {result && result.success && viewMode === 'grid' && (
               <div className="grid grid-cols-6 gap-2">
-                {displayFiles.length === 0 ? (
+                {pageResult.total === 0 ? (
                   <div className="col-span-5 flex flex-col items-center justify-center py-16 gap-3">
                     <FolderOpen size={32} className="text-gray-200" />
                     <p className="text-xs text-gray-400">No files in this category</p>
                   </div>
                 ) : (
-                  displayFiles.slice(0, 300).map((file, idx) => {
-                    const id = file.id || String(idx)
+                  pagedFiles.map((file, idx) => {
+                    const id = file.id || String(pageResult.startIndex + idx)
                     return (
-                      <FileCard key={id} file={file} checked={selectedIds.has(id)} onToggle={() => toggleFile(id)} />
+                      <FileCard key={id} file={file} checked={selectedIds.has(id)} onToggle={() => toggleFile(id, file)} />
                     )
                   })
                 )}
-                {displayFiles.length > 300 && (
-                  <div className="col-span-5 text-center text-xs text-gray-400 pt-2">
-                    Showing 300 of {displayFiles.length.toLocaleString()} files
+                {pagedFiles.length < pageResult.total && (
+                  <div className="col-span-5 text-center pt-2">
+                    <button
+                      onClick={() => setPage((p) => p + 1)}
+                      className="text-xs text-blue-500 hover:text-blue-700 font-medium"
+                    >
+                      Load more ({(pageResult.total - pagedFiles.length).toLocaleString()} remaining)
+                    </button>
                   </div>
                 )}
               </div>
@@ -624,6 +664,7 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
 
             {/* List view */}
             {result && result.success && viewMode === 'list' && (
+              <>
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-white/80 backdrop-blur-sm z-10">
                   <tr className="text-left text-gray-400 font-semibold uppercase tracking-wider border-b border-gray-100">
@@ -646,11 +687,11 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {displayFiles.slice(0, 500).map((file, idx) => {
-                    const id = file.id || String(idx)
+                  {pagedFiles.map((file, idx) => {
+                    const id = file.id || String(pageResult.startIndex + idx)
                     const catCfg = CATEGORIES.find((c) => c.name === getCategory(file))!
                     return (
-                      <tr key={id} onClick={() => toggleFile(id)}
+                      <tr key={id} onClick={() => toggleFile(id, file)}
                         className={`border-b border-gray-50 hover:bg-white/60 cursor-pointer transition-colors ${
                           selectedIds.has(id) ? 'bg-blue-50/60' : ''
                         }`}
@@ -688,17 +729,28 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
                   })}
                 </tbody>
               </table>
+              {pagedFiles.length < pageResult.total && (
+                <div className="text-center py-3">
+                  <button
+                    onClick={() => setPage((p) => p + 1)}
+                    className="text-xs text-blue-500 hover:text-blue-700 font-medium"
+                  >
+                    Load more ({(pageResult.total - pagedFiles.length).toLocaleString()} remaining)
+                  </button>
+                </div>
+              )}
+              </>
             )}
 
             {/* Detail view */}
             {result && result.success && viewMode === 'detail' && (
               <div className="flex flex-col gap-0.5">
-                {displayFiles.slice(0, 500).map((file, idx) => {
-                  const id = file.id || String(idx)
+                {pagedFiles.map((file, idx) => {
+                  const id = file.id || String(pageResult.startIndex + idx)
                   const cat = getCategory(file)
                   const catCfg = CATEGORIES.find((c) => c.name === cat)!
                   return (
-                    <div key={id} onClick={() => toggleFile(id)}
+                    <div key={id} onClick={() => toggleFile(id, file)}
                       className={`flex items-center gap-3 px-3 py-2 rounded-xl cursor-pointer transition-all ${
                         selectedIds.has(id) ? 'bg-blue-50/80' : 'hover:bg-white/60'
                       }`}
@@ -717,6 +769,16 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
                     </div>
                   )
                 })}
+                {pagedFiles.length < pageResult.total && (
+                  <div className="text-center py-3">
+                    <button
+                      onClick={() => setPage((p) => p + 1)}
+                      className="text-xs text-blue-500 hover:text-blue-700 font-medium"
+                    >
+                      Load more ({(pageResult.total - pagedFiles.length).toLocaleString()} remaining)
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -782,24 +844,24 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
         )}
 
         {/* Recover button */}
-        {result && result.success && !isScanning && selectedIds.size === 0 && displayFiles.length > 0 && (
+        {result && result.success && !isScanning && selectedIds.size === 0 && pageResult.total > 0 && (
           <span className="text-[11px] text-gray-400 italic">Select files to recover, or click to recover all</span>
         )}
         <button
           onClick={handleRecover}
-          disabled={isScanning || !result?.success || displayFiles.length === 0}
+          disabled={isScanning || !result?.success || pageResult.total === 0}
           className={`px-5 py-2 rounded-xl text-sm font-semibold transition-all shadow-sm whitespace-nowrap ${
             selectedIds.size > 0
               ? 'bg-gradient-to-r from-blue-500 to-purple-500 text-white hover:shadow-md hover:scale-[1.02]'
-              : result && result.success && !isScanning && displayFiles.length > 0
+              : result && result.success && !isScanning && pageResult.total > 0
               ? 'bg-gradient-to-r from-blue-400 to-purple-400 text-white hover:from-blue-500 hover:to-purple-500'
               : 'bg-gray-200 text-gray-400 cursor-not-allowed'
           }`}
         >
           {selectedIds.size > 0
             ? `Recover (${selectedIds.size})`
-            : displayFiles.length > 0
-            ? `Recover All (${displayFiles.length})`
+            : pageResult.total > 0
+            ? `Recover All (${pageResult.total})`
             : 'Recover'}
         </button>
       </div>

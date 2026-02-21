@@ -372,39 +372,52 @@ impl FileSystemRecoveryEngine {
                     // Format deletion timestamp
                     let deletion_time = format_timestamp(usn_file.timestamp);
                     
-                    // Skip 0-byte files - nothing to recover
-                    if file_size == 0 {
-                        eprintln!("DEBUG [USN-MFT]: Skipping {} - 0 bytes (nothing to recover)",
-                            usn_file.file_name);
+                    // Skip ONLY Windows system files with 0 bytes AND no interesting extension
+                    // Do NOT skip user files even if file_size == 0 (MFT record may have been reused
+                    // but the file was real and recently deleted - show it so user knows it was there)
+                    let is_likely_system = file_size == 0 && (
+                        name_lower.contains(".tmp") ||
+                        name_lower.contains(".log") ||
+                        name_lower.contains(".temp")
+                    );
+                    if is_likely_system {
                         continue;
                     }
                     
-                    // Skip files with no data_runs unless they're very small (≤10KB)
-                    // Small files might be resident in MFT or in Recycle Bin
-                    if data_runs_json == "[]" && file_size > 10 * 1024 {
-                        eprintln!("DEBUG [USN-MFT]: Skipping {} - no data runs, size={} bytes (unrecoverable)",
-                            usn_file.file_name, file_size);
-                        continue;
-                    }
+                    // If data_runs are gone but file existed, still show it with a low recovery chance
+                    // The user deserves to know it was deleted recently, even if recovery is hard
+                    let final_recovery_chance = if file_size == 0 {
+                        // MFT record reused - disk sectors may still have old data but we can't confirm
+                        3u8
+                    } else if data_runs_json == "[]" {
+                        // File exists in USN but cluster chain is lost
+                        8u8
+                    } else {
+                        recovery_chance
+                    };
+                    
+                    // Use a placeholder size when MFT was reused (we know file existed but not exact size)
+                    // Mark clearly as "MFT record reused" in path
+                    let final_size = file_size; // 0 is valid — means we can't confirm size
                     
                     let recoverable = RecoverableFileFS {
                         id: format!("usn_mft_{}", usn_file.mft_record),
                         name: usn_file.file_name.clone(),
                         path: full_path,
-                        size: file_size,
+                        size: final_size,
                         extension: extension.clone(),
                         category,
                         file_type,
                         modified: deletion_time.clone(),
                         created: deletion_time,
                         is_deleted: true,
-                        recovery_chance,
+                        recovery_chance: final_recovery_chance,
                         source: "USN".to_string(),
                         cluster_offset: first_cluster,
                         data_runs: if data_runs_json != "[]" { Some(data_runs_json) } else { None },
                     };
                     
-                    total_size += file_size;
+                    total_size += final_size;
                     mft_entries.push(recoverable);
                     usn_added += 1;
                 }
@@ -948,13 +961,11 @@ fn mft_entry_to_recoverable_with_path(
         }
     };
     
-    // Filter out files that are very unlikely to be recoverable
-    // (deleted, no data_runs, not resident-sized)
-    if entry.is_deleted && entry.data_runs.is_empty() {
-        // Only show small files that might be resident in MFT or in Recycle Bin
-        if entry.file_size > 10 * 1024 {  // Only files ≤10KB without data_runs
-            return None;
-        }
+    // Filter out files that are deleted with no data AND very small (those are likely
+    // empty temporary MFT scraps, not real user files). BUT keep larger deleted files
+    // even without data_runs — they represent real files the user deleted.
+    if entry.is_deleted && entry.data_runs.is_empty() && entry.file_size == 0 {
+        return None;
     }
     
     // Format timestamps
