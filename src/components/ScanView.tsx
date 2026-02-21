@@ -129,11 +129,26 @@ const THUMB: Record<FileCategory, string> = {
 }
 
 // â”€â”€â”€ File Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Image extensions that can be previewed directly from disk
+const IMG_PREVIEW_EXTS = new Set(['jpg','jpeg','png','gif','bmp','webp','tiff','tif','avif','ico'])
+
+const toFileUrl = (p: string): string => {
+  const normalized = p.replace(/\\/g, '/')
+  // Use localfile:// custom protocol registered in main.ts — avoids cross-origin
+  // blocks when the app is loaded from localhost:3000 in dev mode.
+  return normalized.match(/^[A-Za-z]:/) ? `localfile:///${normalized}` : `localfile://${normalized}`
+}
+
 const FileCard = memo(function FileCard({
   file, checked, onToggle,
 }: { file: RecoverableFile; checked: boolean; onToggle: () => void }) {
   const cat = useMemo(() => getCategory(file), [file.extension])
   const catCfg = useMemo(() => CATEGORIES.find((c) => c.name === cat)!, [cat])
+
+  const ext = (file.extension || '').toLowerCase().replace(/^\./, '')
+  const canPreview = !file.is_deleted && IMG_PREVIEW_EXTS.has(ext) && !!file.path
+  const [imgFailed, setImgFailed] = useState(false)
+
   return (
     <div
       className={`group relative rounded-xl overflow-hidden bg-white/60 backdrop-blur-sm shadow-sm hover:shadow-md transition-all flex flex-col cursor-pointer border-2 ${
@@ -142,9 +157,23 @@ const FileCard = memo(function FileCard({
       onClick={onToggle}
     >
       {/* Thumbnail */}
-      <div className={`h-20 flex items-center justify-center ${THUMB[cat]}`}>
-        <div className="opacity-70 scale-150">{catCfg.icon}</div>
-      </div>
+      {canPreview && !imgFailed ? (
+        <div className="h-20 bg-gray-100 overflow-hidden">
+          <img
+            src={toFileUrl(file.path)}
+            alt={file.name}
+            className="w-full h-full object-cover"
+            onError={() => setImgFailed(true)}
+            loading="lazy"
+            draggable={false}
+          />
+        </div>
+      ) : (
+        <div className={`h-20 flex items-center justify-center ${THUMB[cat]}`}>
+          <div className="opacity-70 scale-150">{catCfg.icon}</div>
+        </div>
+      )}
+
       {/* Checkbox */}
       <div className="absolute top-1.5 left-1.5" onClick={(e) => { e.stopPropagation(); onToggle() }}>
         <div className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${
@@ -157,6 +186,7 @@ const FileCard = memo(function FileCard({
           )}
         </div>
       </div>
+
       {/* Deleted badge */}
       {file.is_deleted && (
         <div className="absolute top-1.5 right-1.5 w-3.5 h-3.5 rounded-full bg-red-400/80 flex items-center justify-center">
@@ -165,6 +195,7 @@ const FileCard = memo(function FileCard({
           </svg>
         </div>
       )}
+
       {/* Name */}
       <div className="px-2 py-1.5 bg-white/80 border-t border-gray-100/60">
         <p className="text-[10px] text-gray-600 truncate font-medium" title={file.name}>{file.name || 'Unknown'}</p>

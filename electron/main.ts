@@ -1,7 +1,12 @@
-import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } from 'electron';
 import * as path from 'path';
 import * as os from 'os';
 import { execSync, spawn, ChildProcess } from 'child_process';
+
+// Register before app is ready so it can be used as a privileged scheme
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'localfile', privileges: { bypassCSP: true, corsEnabled: true, supportFetchAPI: true, stream: true } },
+]);
 
 let mainWindow: BrowserWindow | null = null;
 let scanProcess: ChildProcess | null = null;
@@ -451,7 +456,15 @@ ipcMain.handle('relaunch-as-admin', async () => {
   }
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  // Serve local filesystem images via localfile:// to avoid cross-origin blocks
+  protocol.handle('localfile', (req) => {
+    const withoutScheme = req.url.slice('localfile://'.length) // e.g. '/C:/Users/...'
+    const decoded = decodeURIComponent(withoutScheme)
+    return net.fetch(`file://${decoded}`)
+  })
+  createWindow()
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
