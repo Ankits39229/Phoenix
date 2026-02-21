@@ -490,10 +490,13 @@ impl RecoveryEngine {
         let disk = self.disk_reader.as_mut()
             .ok_or("Disk reader not initialized")?;
         
-        let total_sectors = disk.total_sectors();
+        let raw_total = disk.total_sectors();
+        // If the IOCTL returned 0 (e.g. geometry query unsupported on this device)
+        // fall back to a conservative 25 GB worth of sectors so carving still runs.
+        let total_sectors = if raw_total > 0 { raw_total } else { 50_000_000u64 };
         let sectors_to_scan = max_sectors.unwrap_or(total_sectors).min(total_sectors);
-        
-        // For deep scan, scan more sectors (about 50GB)
+
+        // Cap at ~50 GB regardless of drive size to keep deep scan under ~10 min.
         let sector_limit = sectors_to_scan.min(100_000_000);
         
         let signatures = build_signature_lookup();

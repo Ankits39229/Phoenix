@@ -282,9 +282,14 @@ impl FileSystemRecoveryEngine {
                     .collect();
                 
                 let mut usn_added = 0;
+                let mut seen_usn_records: std::collections::HashSet<u64> = std::collections::HashSet::new();
                 for usn_file in &usn_deleted {
-                    // Skip if this MFT record already has an active file
+                    // Skip if this MFT record already has an entry from the MFT scan
                     if existing_mft_records.contains(&usn_file.mft_record) {
+                        continue;
+                    }
+                    // Skip if we already added this MFT record from an earlier USN event
+                    if !seen_usn_records.insert(usn_file.mft_record) {
                         continue;
                     }
                     

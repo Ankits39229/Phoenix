@@ -46,6 +46,7 @@ declare global {
     total_recoverable_size: number
     scan_duration_ms: number
     mft_records_scanned: number
+    sectors_scanned: number
     requires_admin: boolean
     // file arrays omitted — they stay in the main process
     mft_entries?: RecoverableFile[]

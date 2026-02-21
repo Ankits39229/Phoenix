@@ -44,6 +44,7 @@ type ViewMode = 'grid' | 'list' | 'detail'
 
 interface ScanViewProps {
   drive: DriveInfo
+  scanMode?: 'quick' | 'deep'
   onBack: () => void
 }
 
@@ -218,7 +219,7 @@ const FileCard = memo(function FileCard({
   )
 })
 
-const ScanView = ({ drive, onBack }: ScanViewProps) => {
+const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
   const [progress, setProgress] = useState<ScanProgress>({
     status: 'scanning',
     message: 'Initializing scan...',
@@ -318,7 +319,7 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
     })
 
     window.electron
-      .scanDrive(drive.letter, 'quick')
+      .scanDrive(drive.letter, scanMode)
       .then((scanResult: ScanResult) => {
         setResult(scanResult)
         setProgress({ status: 'complete', message: 'Scan complete!', progress: 100, filesFound: scanResult.total_files })
@@ -333,6 +334,9 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
 
   // ── Page result from main process (only current page lives in renderer) ─────
   const [pageResult, setPageResult] = useState<FilesPageResult>({ files: [], total: 0, counts: {}, startIndex: 0 })
+
+  // ── Accumulated list — appends on Load More, resets on any filter change ─────
+  const [displayedFiles, setDisplayedFiles] = useState<RecoverableFile[]>([])
 
   // ── Track actual file objects for recovery across page changes ───────────────
   const [selectedFiles, setSelectedFiles] = useState<Map<string, RecoverableFile>>(new Map())
@@ -358,10 +362,15 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
       deletedOnly: filterDeletedOnly,
       minRecovery: filterMinRecovery,
       folderPath: sidebarFolderPath,
-    }).then(setPageResult)
+    }).then((newResult) => {
+      setPageResult(newResult)
+      // page===1 means a fresh load (filter changed or initial) → replace the list.
+      // page>1 means the user clicked "Load more" → append the new batch.
+      setDisplayedFiles((prev) => page === 1 ? newResult.files : [...prev, ...newResult.files])
+    })
   }, [result?.success, drive.letter, selectedCategory, debouncedSearch, page, PAGE_SIZE, filterDeletedOnly, filterMinRecovery, sidebarFolderPath])
 
-  const pagedFiles = pageResult.files
+  const pagedFiles = displayedFiles
   const categoryCounts = pageResult.counts as Record<FileCategory, number>
   const totalSize = result?.total_recoverable_size || 0
 
@@ -765,13 +774,13 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
                     )
                   })
                 )}
-                {pagedFiles.length < pageResult.total && (
+                {displayedFiles.length < pageResult.total && (
                   <div className="col-span-5 text-center pt-2">
                     <button
                       onClick={() => setPage((p) => p + 1)}
                       className="text-xs text-blue-500 hover:text-blue-700 font-medium"
                     >
-                      Load more ({(pageResult.total - pagedFiles.length).toLocaleString()} remaining)
+                      Load more ({(pageResult.total - displayedFiles.length).toLocaleString()} remaining)
                     </button>
                   </div>
                 )}
@@ -845,13 +854,13 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
                   })}
                 </tbody>
               </table>
-              {pagedFiles.length < pageResult.total && (
+              {displayedFiles.length < pageResult.total && (
                 <div className="text-center py-3">
                   <button
                     onClick={() => setPage((p) => p + 1)}
                     className="text-xs text-blue-500 hover:text-blue-700 font-medium"
                   >
-                    Load more ({(pageResult.total - pagedFiles.length).toLocaleString()} remaining)
+                    Load more ({(pageResult.total - displayedFiles.length).toLocaleString()} remaining)
                   </button>
                 </div>
               )}
@@ -885,13 +894,13 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
                     </div>
                   )
                 })}
-                {pagedFiles.length < pageResult.total && (
+                {displayedFiles.length < pageResult.total && (
                   <div className="text-center py-3">
                     <button
                       onClick={() => setPage((p) => p + 1)}
                       className="text-xs text-blue-500 hover:text-blue-700 font-medium"
                     >
-                      Load more ({(pageResult.total - pagedFiles.length).toLocaleString()} remaining)
+                      Load more ({(pageResult.total - displayedFiles.length).toLocaleString()} remaining)
                     </button>
                   </div>
                 )}
@@ -907,7 +916,11 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
 
         <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold text-gray-700">
-            {isScanning ? 'Quick Scanning' : progress.status === 'complete' ? 'Scan Complete' : progress.status === 'error' ? 'Scan Error' : 'Scan Cancelled'}
+            {isScanning
+              ? (scanMode === 'deep' ? 'Deep Scanning' : 'Quick Scanning')
+              : progress.status === 'complete' ? 'Scan Complete'
+              : progress.status === 'error' ? 'Scan Error'
+              : 'Scan Cancelled'}
             {', Files Found: '}
             <span className="text-blue-600">
               {((isScanning ? progress.filesFound : result?.total_files) ?? 0).toLocaleString()}
@@ -919,7 +932,11 @@ const ScanView = ({ drive, onBack }: ScanViewProps) => {
             )}
           </p>
           <p className="text-[10px] text-gray-400 truncate">
-            {isScanning ? progress.message : result ? `${result.scan_mode || 'quick'} scan â€¢ ${(result.mft_records_scanned || 0).toLocaleString()} MFT records` : error || 'Ready'}
+            {isScanning
+              ? progress.message
+              : result
+              ? `${result.scan_mode || scanMode} scan • ${(result.mft_records_scanned || 0).toLocaleString()} MFT records${result.scan_mode?.toLowerCase() === 'deep' ? ` • ${(result.sectors_scanned || 0).toLocaleString()} sectors carved` : ''}`
+              : error || 'Ready'}
           </p>
         </div>
 

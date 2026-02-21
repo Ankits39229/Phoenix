@@ -49,6 +49,7 @@ function stripMeta(r: any) {
     total_recoverable_size: r.total_recoverable_size,
     scan_duration_ms: r.scan_duration_ms,
     mft_records_scanned: r.mft_records_scanned,
+    sectors_scanned: r.sectors_scanned,
     requires_admin: r.requires_admin,
   };
 }
@@ -86,6 +87,16 @@ function getFilteredFiles(opts: FilterOpts): any[] {
         return fp.startsWith(activeFolderFilter);
       })
     : raw;
+
+  // Deduplicate by id — USN journal entries can share the same MFT record number
+  // as MFT scan entries or appear multiple times for the same file.
+  const seenIds = new Set<string>();
+  filtered = filtered.filter((f) => {
+    const id = f.id || '';
+    if (!id || seenIds.has(id)) return false;
+    seenIds.add(id);
+    return true;
+  });
 
   if (category) filtered = filtered.filter((f) => fileCat(f) === category);
   if (search.trim()) {
