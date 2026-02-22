@@ -2,40 +2,641 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ─────────────────────────────────────────────────────────────────────────────
+   CSS CUSTOM PROPERTIES — one block per theme, set on :root via [data-theme]
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* ── Fallback / Default (blue-purple-pink glass) ─────────────────────────── */
+:root,
+[data-theme="default"] {
+  --app-bg: linear-gradient(135deg, #bfdbfe 0%, #ede9fe 55%, #fce7f3 100%);
+
+  --surface-panel:        rgba(255, 255, 255, 0.50);
+  --surface-card:         rgba(255, 255, 255, 0.55);
+  --surface-card-hover:   rgba(255, 255, 255, 0.75);
+  --surface-input:        rgba(243, 244, 246, 0.60); /* gray-100/60 */
+  --surface-dropdown:     #ffffff;
+  --surface-nav-pill:     rgba(255, 255, 255, 0.40);
+  --surface-nav-active:   rgba(255, 255, 255, 0.95);
+  --surface-overlay:      rgba(255, 255, 255, 0.40);
+  --surface-sticky:       rgba(255, 255, 255, 0.80);
+  --surface-modal:        rgba(255, 255, 255, 0.90);
+
+  --border:               rgba(255, 255, 255, 0.60);
+  --border-subtle:        rgba(0, 0, 0, 0.05);
+  --border-muted:         rgba(229, 231, 235, 1);   /* gray-200 */
+  --border-dropdown:      #f3f4f6;                  /* gray-100 */
+
+  --text-primary:         #374151;  /* gray-700 */
+  --text-secondary:       #6b7280;  /* gray-500 */
+  --text-muted:           #9ca3af;  /* gray-400 */
+  --text-on-accent:       #ffffff;
+
+  --accent:               #6366f1;  /* indigo-500 */
+  --accent-subtle:        #e0e7ff;  /* indigo-100 */
+  --accent-hover:         #4f46e5;  /* indigo-600 */
+  --accent-text:          #4338ca;  /* indigo-700 */
+
+  /* Section header line / title */
+  --section-line:         rgba(191, 219, 254, 0.60);
+  --section-title:        #6366f1;
+
+  /* Sidebar active state */
+  --sidebar-active-bg:    rgba(239, 246, 255, 0.80);
+  --sidebar-active-text:  #1d4ed8;
+
+  /* Progress bars */
+  --progress-from:        #60a5fa;  /* blue-400 */
+  --progress-to:          #818cf8;  /* indigo-400 */
+
+  /* Scrollbar */
+  --scrollbar:            rgba(0, 0, 0, 0.10);
+  --scrollbar-hover:      rgba(0, 0, 0, 0.20);
+
+  /* Backdrop blur — glass themes keep blur, flat themes none */
+  --backdrop:             blur(12px);
+  --backdrop-sm:          blur(8px);
+
+  /* Nav item text */
+  --nav-active-text:      #1f2937;
+  --nav-text:             #6b7280;
+
+  color-scheme: light;
+}
+
+/* ── Material Design 3 — Light ───────────────────────────────────────────── */
+[data-theme="material-light"] {
+  --app-bg: linear-gradient(160deg, #FEF7FF 0%, #F7F2FA 100%);
+
+  --surface-panel:        rgba(243, 237, 247, 0.97);
+  --surface-card:         rgba(255, 255, 255, 0.98);
+  --surface-card-hover:   #ffffff;
+  --surface-input:        #EDE7F6;
+  --surface-dropdown:     #FFFBFE;
+  --surface-nav-pill:     rgba(230, 223, 246, 0.80);
+  --surface-nav-active:   #EADDFF;
+  --surface-overlay:      rgba(0, 0, 0, 0.32);
+  --surface-sticky:       rgba(255, 251, 254, 0.95);
+  --surface-modal:        #FFFBFE;
+
+  --border:               #CAC4D0;
+  --border-subtle:        #E6DFF6;
+  --border-muted:         #CAC4D0;
+  --border-dropdown:      #CAC4D0;
+
+  --text-primary:         #1C1B1F;
+  --text-secondary:       #49454F;
+  --text-muted:           #79747E;
+  --text-on-accent:       #ffffff;
+
+  --accent:               #6750A4;  /* M3 Primary */
+  --accent-subtle:        #EADDFF;  /* M3 Primary Container */
+  --accent-hover:         #4F378B;
+  --accent-text:          #21005D;  /* M3 On-Primary-Container */
+
+  --section-line:         #E6DFF6;
+  --section-title:        #6750A4;
+
+  --sidebar-active-bg:    #EADDFF;
+  --sidebar-active-text:  #21005D;
+
+  --progress-from:        #9A82DB;
+  --progress-to:          #6750A4;
+
+  --scrollbar:            rgba(103, 80, 164, 0.15);
+  --scrollbar-hover:      rgba(103, 80, 164, 0.30);
+
+  --backdrop:             none;
+  --backdrop-sm:          none;
+
+  --nav-active-text:      #21005D;
+  --nav-text:             #49454F;
+
+  color-scheme: light;
+}
+
+/* ── Material Design 3 — Dark ────────────────────────────────────────────── */
+[data-theme="material-dark"] {
+  --app-bg: linear-gradient(160deg, #10_0E14 0%, #211F26 100%);
+  /* fallback solid for Tailwind */
+  --app-bg: linear-gradient(160deg, #1C1B1F 0%, #2B2930 100%);
+
+  --surface-panel:        rgba(33, 31, 38, 0.98);
+  --surface-card:         rgba(44, 40, 52, 0.98);
+  --surface-card-hover:   rgba(55, 51, 64, 1);
+  --surface-input:        rgba(73, 69, 79, 0.55);
+  --surface-dropdown:     #2B2930;
+  --surface-nav-pill:     rgba(33, 31, 38, 0.95);
+  --surface-nav-active:   rgba(79, 55, 139, 0.70);
+  --surface-overlay:      rgba(0, 0, 0, 0.55);
+  --surface-sticky:       rgba(33, 31, 38, 0.98);
+  --surface-modal:        #2B2930;
+
+  --border:               #49454F;
+  --border-subtle:        rgba(255, 255, 255, 0.08);
+  --border-muted:         #49454F;
+  --border-dropdown:      #49454F;
+
+  --text-primary:         #E6E1E5;
+  --text-secondary:       #CAC4D0;
+  --text-muted:           #79747E;
+  --text-on-accent:       #381E72;
+
+  --accent:               #D0BCFF;  /* M3 Dark Primary */
+  --accent-subtle:        rgba(79, 55, 139, 0.50);
+  --accent-hover:         #B69DF8;
+  --accent-text:          #EADDFF;
+
+  --section-line:         rgba(208, 188, 255, 0.20);
+  --section-title:        #D0BCFF;
+
+  --sidebar-active-bg:    rgba(79, 55, 139, 0.45);
+  --sidebar-active-text:  #D0BCFF;
+
+  --progress-from:        #CCC2DC;
+  --progress-to:          #D0BCFF;
+
+  --scrollbar:            rgba(208, 188, 255, 0.15);
+  --scrollbar-hover:      rgba(208, 188, 255, 0.30);
+
+  --backdrop:             none;
+  --backdrop-sm:          none;
+
+  --nav-active-text:      #E6E1E5;
+  --nav-text:             #79747E;
+
+  color-scheme: dark;
+}
+
+/* ── Monochrome — Light ──────────────────────────────────────────────────── */
+[data-theme="mono-light"] {
+  --app-bg: #F5F5F5;
+
+  --surface-panel:        rgba(255, 255, 255, 0.97);
+  --surface-card:         rgba(255, 255, 255, 0.98);
+  --surface-card-hover:   #ffffff;
+  --surface-input:        rgba(0, 0, 0, 0.05);
+  --surface-dropdown:     #ffffff;
+  --surface-nav-pill:     rgba(224, 224, 224, 0.80);
+  --surface-nav-active:   #ffffff;
+  --surface-overlay:      rgba(0, 0, 0, 0.30);
+  --surface-sticky:       rgba(255, 255, 255, 0.97);
+  --surface-modal:        #ffffff;
+
+  --border:               #E0E0E0;
+  --border-subtle:        #F0F0F0;
+  --border-muted:         #E0E0E0;
+  --border-dropdown:      #E0E0E0;
+
+  --text-primary:         #212121;
+  --text-secondary:       #616161;
+  --text-muted:           #9E9E9E;
+  --text-on-accent:       #ffffff;
+
+  --accent:               #212121;
+  --accent-subtle:        #F5F5F5;
+  --accent-hover:         #000000;
+  --accent-text:          #212121;
+
+  --section-line:         #E0E0E0;
+  --section-title:        #424242;
+
+  --sidebar-active-bg:    #F5F5F5;
+  --sidebar-active-text:  #212121;
+
+  --progress-from:        #757575;
+  --progress-to:          #212121;
+
+  --scrollbar:            rgba(0, 0, 0, 0.10);
+  --scrollbar-hover:      rgba(0, 0, 0, 0.20);
+
+  --backdrop:             none;
+  --backdrop-sm:          none;
+
+  --nav-active-text:      #212121;
+  --nav-text:             #757575;
+
+  color-scheme: light;
+}
+
+/* ── Monochrome — Dark ───────────────────────────────────────────────────── */
+[data-theme="mono-dark"] {
+  --app-bg: #121212;
+
+  --surface-panel:        rgba(26, 26, 26, 0.99);
+  --surface-card:         rgba(30, 30, 30, 0.99);
+  --surface-card-hover:   rgba(38, 38, 38, 1);
+  --surface-input:        rgba(255, 255, 255, 0.08);
+  --surface-dropdown:     #1E1E1E;
+  --surface-nav-pill:     rgba(26, 26, 26, 0.98);
+  --surface-nav-active:   #2C2C2C;
+  --surface-overlay:      rgba(0, 0, 0, 0.60);
+  --surface-sticky:       rgba(18, 18, 18, 0.98);
+  --surface-modal:        #1E1E1E;
+
+  --border:               #2C2C2C;
+  --border-subtle:        rgba(255, 255, 255, 0.06);
+  --border-muted:         #2C2C2C;
+  --border-dropdown:      #2C2C2C;
+
+  --text-primary:         #EEEEEE;
+  --text-secondary:       #BDBDBD;
+  --text-muted:           #757575;
+  --text-on-accent:       #121212;
+
+  --accent:               #EEEEEE;
+  --accent-subtle:        rgba(255, 255, 255, 0.10);
+  --accent-hover:         #ffffff;
+  --accent-text:          #EEEEEE;
+
+  --section-line:         rgba(255, 255, 255, 0.10);
+  --section-title:        #BDBDBD;
+
+  --sidebar-active-bg:    #2C2C2C;
+  --sidebar-active-text:  #EEEEEE;
+
+  --progress-from:        #9E9E9E;
+  --progress-to:          #EEEEEE;
+
+  --scrollbar:            rgba(255, 255, 255, 0.08);
+  --scrollbar-hover:      rgba(255, 255, 255, 0.16);
+
+  --backdrop:             none;
+  --backdrop-sm:          none;
+
+  --nav-active-text:      #EEEEEE;
+  --nav-text:             #757575;
+
+  color-scheme: dark;
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   SEMANTIC UTILITY CLASSES  (consumed by components)
+   ───────────────────────────────────────────────────────────────────────────── */
 @layer base {
   body {
-    @apply bg-white text-gray-800;
+    @apply text-gray-800;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-      sans-serif;
+      'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    background: var(--app-bg, #f0f0f0);
   }
 }
 
 @layer utilities {
-  .drag-region {
-    -webkit-app-region: drag;
+  .drag-region  { -webkit-app-region: drag; }
+  .no-drag      { -webkit-app-region: no-drag; }
+}
+
+@layer components {
+  /* Root background */
+  .app-bg {
+    background: var(--app-bg);
+    transition: background 0.35s ease;
   }
-  .no-drag {
-    -webkit-app-region: no-drag;
+
+  /* Semi-transparent panels (top nav, sidebar, right content in ScanView) */
+  .theme-panel {
+    background: var(--surface-panel);
+    backdrop-filter: var(--backdrop);
+    border: 1px solid var(--border-subtle);
+  }
+
+  /* Card widgets (dashboard drive cards etc.) */
+  .theme-card {
+    background: var(--surface-card);
+    backdrop-filter: var(--backdrop);
+  }
+  .theme-card:hover {
+    background: var(--surface-card-hover);
+  }
+
+  /* Dropdown / popover panels */
+  .theme-dropdown {
+    background: var(--surface-dropdown);
+    border: 1px solid var(--border-dropdown);
+  }
+
+  /* Sticky list header */
+  .theme-sticky {
+    background: var(--surface-sticky);
+    backdrop-filter: var(--backdrop-sm);
+  }
+
+  /* Modal card */
+  .theme-modal {
+    background: var(--surface-modal);
+    border: 1px solid var(--border);
+  }
+
+  /* Modal / scan-mode overlay backdrop */
+  .theme-overlay {
+    background: var(--surface-overlay);
+    backdrop-filter: var(--backdrop-sm);
+  }
+
+  /* TitleBar nav pill container */
+  .theme-nav-pill {
+    background: var(--surface-nav-pill);
+    backdrop-filter: var(--backdrop-sm);
+  }
+
+  /* Active nav tab */
+  .theme-nav-active {
+    background: var(--surface-nav-active) !important;
+    color: var(--nav-active-text) !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  }
+
+  /* Inputs and control backgrounds (search, view-toggle) */
+  .theme-input {
+    background: var(--surface-input);
   }
 }
 
-/* Custom scrollbar for light theme */
-::-webkit-scrollbar {
-  width: 8px;
-}
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+/* ─────────────────────────────────────────────────────────────────────────────
+   THEME OVERRIDES — flat selectors (no CSS nesting; PostCSS compatible)
+   These live OUTSIDE @layer so they win over layered Tailwind utilities.
+   ───────────────────────────────────────────────────────────────────────────── */
 
-::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.1);
-  border-radius: 4px;
-}
+/* ── Dark themes: text ───────────────────────────────────────────────────── */
+[data-theme="material-dark"] .text-gray-800,
+[data-theme="material-dark"] .text-gray-700,
+[data-theme="material-dark"] .text-gray-600,
+[data-theme="mono-dark"] .text-gray-800,
+[data-theme="mono-dark"] .text-gray-700,
+[data-theme="mono-dark"] .text-gray-600 { color: var(--text-primary); }
 
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.2);
-}
+[data-theme="material-dark"] .text-gray-500,
+[data-theme="material-dark"] .text-gray-400,
+[data-theme="mono-dark"] .text-gray-500,
+[data-theme="mono-dark"] .text-gray-400 { color: var(--text-secondary); }
+
+[data-theme="material-dark"] .text-gray-300,
+[data-theme="mono-dark"] .text-gray-300 { color: var(--text-muted); }
+
+/* ── Dark themes: accent text ────────────────────────────────────────────── */
+[data-theme="material-dark"] .text-blue-500,
+[data-theme="material-dark"] .text-blue-600,
+[data-theme="material-dark"] .text-blue-400,
+[data-theme="mono-dark"] .text-blue-500,
+[data-theme="mono-dark"] .text-blue-600,
+[data-theme="mono-dark"] .text-blue-400 { color: var(--accent); }
+
+[data-theme="material-dark"] .text-blue-700,
+[data-theme="mono-dark"] .text-blue-700 { color: var(--accent-text); }
+
+[data-theme="material-dark"] .text-indigo-500,
+[data-theme="material-dark"] .text-indigo-600,
+[data-theme="material-dark"] .text-purple-500,
+[data-theme="material-dark"] .text-purple-600,
+[data-theme="mono-dark"] .text-indigo-500,
+[data-theme="mono-dark"] .text-indigo-600,
+[data-theme="mono-dark"] .text-purple-500,
+[data-theme="mono-dark"] .text-purple-600 { color: var(--accent); }
+
+/* ── Dark themes: panel/card surfaces ───────────────────────────────────── */
+[data-theme="material-dark"] .bg-white\/90,
+[data-theme="material-dark"] .bg-white\/80,
+[data-theme="material-dark"] .bg-white\/75,
+[data-theme="material-dark"] .bg-white\/60,
+[data-theme="material-dark"] .bg-white\/55,
+[data-theme="material-dark"] .bg-white\/50,
+[data-theme="material-dark"] .bg-white\/40,
+[data-theme="material-dark"] .bg-white,
+[data-theme="mono-dark"] .bg-white\/90,
+[data-theme="mono-dark"] .bg-white\/80,
+[data-theme="mono-dark"] .bg-white\/75,
+[data-theme="mono-dark"] .bg-white\/60,
+[data-theme="mono-dark"] .bg-white\/55,
+[data-theme="mono-dark"] .bg-white\/50,
+[data-theme="mono-dark"] .bg-white\/40,
+[data-theme="mono-dark"] .bg-white { background: var(--surface-panel); }
+
+/* ── Dark themes: input surfaces ─────────────────────────────────────────── */
+[data-theme="material-dark"] .bg-gray-100\/60,
+[data-theme="material-dark"] .bg-gray-100,
+[data-theme="material-dark"] .bg-gray-50,
+[data-theme="mono-dark"] .bg-gray-100\/60,
+[data-theme="mono-dark"] .bg-gray-100,
+[data-theme="mono-dark"] .bg-gray-50 { background: var(--surface-input); }
+
+/* ── Dark themes: accent fills ───────────────────────────────────────────── */
+[data-theme="material-dark"] .bg-blue-500,
+[data-theme="mono-dark"] .bg-blue-500 { background-color: var(--accent); }
+
+[data-theme="material-dark"] .bg-blue-50\/80,
+[data-theme="material-dark"] .bg-blue-50,
+[data-theme="material-dark"] .bg-blue-100,
+[data-theme="mono-dark"] .bg-blue-50\/80,
+[data-theme="mono-dark"] .bg-blue-50,
+[data-theme="mono-dark"] .bg-blue-100 { background: var(--accent-subtle); }
+
+/* Purple/violet active states (modal deep scan card) */
+[data-theme="material-dark"] .bg-purple-50\/80,
+[data-theme="material-dark"] .bg-purple-50,
+[data-theme="mono-dark"] .bg-purple-50\/80,
+[data-theme="mono-dark"] .bg-purple-50 { background: var(--accent-subtle); }
+
+[data-theme="material-dark"] .border-purple-400,
+[data-theme="mono-dark"] .border-purple-400 { border-color: var(--accent); }
+
+[data-theme="material-dark"] .bg-slate-50,
+[data-theme="mono-dark"] .bg-slate-50 { background: var(--surface-input); }
+
+/* ── Dark themes: borders ────────────────────────────────────────────────── */
+[data-theme="material-dark"] .border-gray-100,
+[data-theme="material-dark"] .border-gray-200,
+[data-theme="mono-dark"] .border-gray-100,
+[data-theme="mono-dark"] .border-gray-200 { border-color: var(--border-muted); }
+
+[data-theme="material-dark"] .border-blue-500,
+[data-theme="mono-dark"] .border-blue-500 { border-color: var(--accent); }
+
+[data-theme="material-dark"] .border-blue-100,
+[data-theme="mono-dark"] .border-blue-100 { border-color: var(--border-muted); }
+
+/* ── Dark themes: dividers ───────────────────────────────────────────────── */
+[data-theme="material-dark"] .bg-gray-200\/60,
+[data-theme="mono-dark"] .bg-gray-200\/60 { background: rgba(255,255,255,0.08); }
+
+/* ── Dark themes: all gradient classes (progress + buttons) ──────────────── */
+[data-theme="material-dark"] .from-blue-400,
+[data-theme="material-dark"] .from-blue-500,
+[data-theme="mono-dark"] .from-blue-400,
+[data-theme="mono-dark"] .from-blue-500 { --tw-gradient-from: var(--progress-from); }
+
+[data-theme="material-dark"] .to-blue-500,
+[data-theme="material-dark"] .to-purple-400,
+[data-theme="material-dark"] .to-purple-500,
+[data-theme="mono-dark"] .to-blue-500,
+[data-theme="mono-dark"] .to-purple-400,
+[data-theme="mono-dark"] .to-purple-500 { --tw-gradient-to: var(--progress-to); }
+
+/* hover variants (Recover button hover state) */
+[data-theme="material-dark"] .hover\:from-blue-500:hover,
+[data-theme="mono-dark"] .hover\:from-blue-500:hover { --tw-gradient-from: var(--progress-from); }
+
+[data-theme="material-dark"] .hover\:to-purple-500:hover,
+[data-theme="mono-dark"] .hover\:to-purple-500:hover { --tw-gradient-to: var(--progress-to); }
+
+/* ── Dark themes: animated scan borders ─────────────────────────────────── */
+[data-theme="material-dark"] .border-t-blue-400,
+[data-theme="mono-dark"] .border-t-blue-400 { border-top-color: var(--progress-from); }
+
+[data-theme="material-dark"] .border-b-purple-400,
+[data-theme="mono-dark"] .border-b-purple-400 { border-bottom-color: var(--progress-to); }
+
+/* ── Dark themes: scrollbar ──────────────────────────────────────────────── */
+[data-theme="material-dark"] ::-webkit-scrollbar-thumb,
+[data-theme="mono-dark"] ::-webkit-scrollbar-thumb { background: var(--scrollbar); }
+
+[data-theme="material-dark"] ::-webkit-scrollbar-thumb:hover,
+[data-theme="mono-dark"] ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+
+/* ── Material Light overrides ────────────────────────────────────────────── */
+[data-theme="material-light"] .text-blue-500,
+[data-theme="material-light"] .text-blue-600,
+[data-theme="material-light"] .text-blue-400 { color: var(--accent); }
+
+[data-theme="material-light"] .text-blue-700 { color: var(--accent-text); }
+
+[data-theme="material-light"] .text-indigo-500,
+[data-theme="material-light"] .text-purple-500 { color: var(--accent); }
+
+[data-theme="material-light"] .bg-white\/55,
+[data-theme="material-light"] .bg-white\/50,
+[data-theme="material-light"] .bg-white\/40 { background: var(--surface-panel); }
+
+[data-theme="material-light"] .bg-blue-500 { background-color: var(--accent); }
+
+[data-theme="material-light"] .bg-blue-50\/80,
+[data-theme="material-light"] .bg-blue-50,
+[data-theme="material-light"] .bg-blue-100 { background: var(--accent-subtle); }
+
+[data-theme="material-light"] .border-blue-500 { border-color: var(--accent); }
+[data-theme="material-light"] .border-blue-100 { border-color: var(--border-subtle); }
+[data-theme="material-light"] .border-gray-100 { border-color: var(--border-subtle); }
+
+[data-theme="material-light"] .from-blue-400,
+[data-theme="material-light"] .from-blue-500 { --tw-gradient-from: var(--progress-from); }
+[data-theme="material-light"] .to-blue-500,
+[data-theme="material-light"] .to-purple-400,
+[data-theme="material-light"] .to-purple-500 { --tw-gradient-to:   var(--progress-to); }
+
+[data-theme="material-light"] ::-webkit-scrollbar-thumb { background: var(--scrollbar); }
+[data-theme="material-light"] ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+
+/* ── Mono Light overrides ────────────────────────────────────────────────── */
+[data-theme="mono-light"] .text-blue-500,
+[data-theme="mono-light"] .text-blue-600,
+[data-theme="mono-light"] .text-blue-400 { color: var(--accent); }
+
+[data-theme="mono-light"] .text-blue-700 { color: var(--accent-text); }
+
+[data-theme="mono-light"] .text-indigo-500,
+[data-theme="mono-light"] .text-purple-500 { color: var(--accent); }
+
+[data-theme="mono-light"] .bg-white\/55,
+[data-theme="mono-light"] .bg-white\/50,
+[data-theme="mono-light"] .bg-white\/40 { background: var(--surface-panel); }
+
+[data-theme="mono-light"] .bg-blue-500 { background-color: var(--accent); }
+
+[data-theme="mono-light"] .bg-blue-50\/80,
+[data-theme="mono-light"] .bg-blue-50,
+[data-theme="mono-light"] .bg-blue-100 { background: var(--accent-subtle); }
+
+[data-theme="mono-light"] .border-blue-500 { border-color: var(--accent); }
+[data-theme="mono-light"] .border-blue-100 { border-color: var(--border-subtle); }
+
+[data-theme="mono-light"] .from-blue-400,
+[data-theme="mono-light"] .from-blue-500 { --tw-gradient-from: var(--progress-from); }
+[data-theme="mono-light"] .to-blue-500,
+[data-theme="mono-light"] .to-purple-400,
+[data-theme="mono-light"] .to-purple-500 { --tw-gradient-to:   var(--progress-to); }
+
+/* ── Missing bg-white/60 (bottom bar, FileCard) ─────────────────────────── */
+[data-theme="material-dark"] .bg-white\/60,
+[data-theme="mono-dark"] .bg-white\/60 { background: var(--surface-panel); }
+
+/* ── File card selection borders ────────────────────────────────────────── */
+[data-theme="material-dark"] .border-blue-400,
+[data-theme="mono-dark"] .border-blue-400 { border-color: var(--accent); }
+
+[data-theme="material-dark"] .hover\:border-blue-200:hover,
+[data-theme="mono-dark"] .hover\:border-blue-200:hover { border-color: var(--border-muted); }
+
+/* ── Category thumbnail backgrounds — tone down on dark themes ───────────── */
+[data-theme="material-dark"] .bg-cyan-100,
+[data-theme="material-dark"] .bg-teal-100,
+[data-theme="material-dark"] .bg-green-100,
+[data-theme="material-dark"] .bg-pink-100,
+[data-theme="material-dark"] .bg-orange-100,
+[data-theme="material-dark"] .bg-yellow-100,
+[data-theme="material-dark"] .bg-violet-100,
+[data-theme="material-dark"] .bg-red-100,
+[data-theme="mono-dark"] .bg-cyan-100,
+[data-theme="mono-dark"] .bg-teal-100,
+[data-theme="mono-dark"] .bg-green-100,
+[data-theme="mono-dark"] .bg-pink-100,
+[data-theme="mono-dark"] .bg-orange-100,
+[data-theme="mono-dark"] .bg-yellow-100,
+[data-theme="mono-dark"] .bg-violet-100,
+[data-theme="mono-dark"] .bg-red-100 { background: var(--surface-input); }
+
+/* ── mono-dark: desaturate all category icon colors ─────────────────────── */
+[data-theme="mono-dark"] .text-cyan-600,
+[data-theme="mono-dark"] .text-teal-600,
+[data-theme="mono-dark"] .text-green-500,
+[data-theme="mono-dark"] .text-pink-500,
+[data-theme="mono-dark"] .text-orange-500,
+[data-theme="mono-dark"] .text-yellow-600,
+[data-theme="mono-dark"] .text-violet-500,
+[data-theme="mono-dark"] .text-red-400 { color: var(--text-secondary); }
+
+/* ── material-dark: keep hue but dim bright category icon colors ─────────── */
+[data-theme="material-dark"] .text-cyan-600 { color: #80CBC4; }
+[data-theme="material-dark"] .text-teal-600 { color: #80CBC4; }
+[data-theme="material-dark"] .text-green-500 { color: #A5D6A7; }
+[data-theme="material-dark"] .text-pink-500  { color: #F48FB1; }
+[data-theme="material-dark"] .text-orange-500 { color: #FFCC80; }
+[data-theme="material-dark"] .text-yellow-600 { color: #FFF176; }
+[data-theme="material-dark"] .text-violet-500 { color: #CE93D8; }
+[data-theme="material-dark"] .text-red-400   { color: #EF9A9A; }
+
+/* ── Hover states ────────────────────────────────────────────────────────── */
+[data-theme="material-dark"] .hover\:bg-gray-50:hover,
+[data-theme="material-dark"] .hover\:bg-gray-100:hover,
+[data-theme="material-dark"] .hover\:bg-gray-200\/80:hover,
+[data-theme="mono-dark"] .hover\:bg-gray-50:hover,
+[data-theme="mono-dark"] .hover\:bg-gray-100:hover,
+[data-theme="mono-dark"] .hover\:bg-gray-200\/80:hover { background: var(--surface-input); }
+[data-theme="material-dark"] .hover\\:border-gray-300:hover,
+[data-theme="mono-dark"] .hover\\:border-gray-300:hover { border-color: var(--border-muted); }
+/* ── Cancel backdrop-blur on flat (non-gradient) themes ──────────────────── */
+[data-theme="material-light"] .backdrop-blur-md,
+[data-theme="material-light"] .backdrop-blur-sm,
+[data-theme="material-light"] .backdrop-blur,
+[data-theme="material-dark"] .backdrop-blur-md,
+[data-theme="material-dark"] .backdrop-blur-sm,
+[data-theme="material-dark"] .backdrop-blur,
+[data-theme="mono-light"] .backdrop-blur-md,
+[data-theme="mono-light"] .backdrop-blur-sm,
+[data-theme="mono-light"] .backdrop-blur,
+[data-theme="mono-dark"] .backdrop-blur-md,
+[data-theme="mono-dark"] .backdrop-blur-sm,
+[data-theme="mono-dark"] .backdrop-blur { backdrop-filter: none; }
+
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   SCROLLBAR  (default / light themes)
+   ───────────────────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar           { width: 8px; }
+::-webkit-scrollbar-track     { background: transparent; }
+::-webkit-scrollbar-thumb     { background: var(--scrollbar, rgba(0,0,0,0.10)); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover, rgba(0,0,0,0.20)); }
+

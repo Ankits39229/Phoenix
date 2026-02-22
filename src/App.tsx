@@ -1,8 +1,11 @@
 import { useState } from 'react'
 import { Zap, ScanSearch, HardDrive, X, ChevronRight } from 'lucide-react'
-import TitleBar from './components/TitleBar'
+import TitleBar, { NavPage } from './components/TitleBar'
 import Dashboard from './components/Dashboard'
 import ScanView from './components/ScanView'
+import Settings from './components/Settings'
+import About from './components/About'
+import { ThemeProvider } from './context/ThemeContext'
 
 type View = 'dashboard' | 'scanning'
 export type ScanMode = 'quick' | 'deep'
@@ -52,8 +55,8 @@ function PreScanModal({ drive, onConfirm, onCancel }: PreScanModalProps) {
   ]
 
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/40 backdrop-blur-sm">
-      <div className="w-[520px] rounded-2xl bg-white/90 backdrop-blur-md shadow-2xl border border-white/60 overflow-hidden">
+    <div className="absolute inset-0 z-50 flex items-center justify-center theme-overlay">
+      <div className="w-[520px] rounded-2xl theme-modal backdrop-blur-md shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="px-6 py-4 flex items-center justify-between border-b border-gray-100">
           <div className="flex items-center gap-3">
@@ -130,9 +133,16 @@ function PreScanModal({ drive, onConfirm, onCancel }: PreScanModalProps) {
 
 function App() {
   const [view, setView] = useState<View>('dashboard')
+  const [page, setPage] = useState<NavPage>('dashboard')
   const [selectedDrive, setSelectedDrive] = useState<DriveInfo | null>(null)
   const [pendingDrive, setPendingDrive] = useState<DriveInfo | null>(null)
   const [scanMode, setScanMode] = useState<ScanMode>('quick')
+
+  const handleNavigate = (dest: NavPage) => {
+    // Don't allow navigating away mid-scan
+    if (view === 'scanning') return
+    setPage(dest)
+  }
 
   const handleDriveClick = (drive: DriveInfo) => {
     setPendingDrive(drive)
@@ -154,14 +164,21 @@ function App() {
     setSelectedDrive(null)
   }
 
+  const activePage: NavPage = view === 'scanning' ? 'dashboard' : page
+
   return (
-    <div className="h-screen w-screen relative overflow-hidden bg-gradient-to-br from-blue-200 via-purple-100 to-pink-200">
-      <TitleBar />
+    <ThemeProvider>
+    <div className="h-screen w-screen relative overflow-hidden app-bg">
+      <TitleBar currentPage={activePage} onNavigate={handleNavigate} />
       <div className="flex h-full overflow-hidden">
-        {view === 'dashboard' ? (
-          <Dashboard onDriveClick={handleDriveClick} />
-        ) : (
+        {view === 'scanning' ? (
           <ScanView drive={selectedDrive!} scanMode={scanMode} onBack={handleBackToDashboard} />
+        ) : page === 'settings' ? (
+          <Settings />
+        ) : page === 'about' ? (
+          <About />
+        ) : (
+          <Dashboard onDriveClick={handleDriveClick} />
         )}
       </div>
       {pendingDrive && (
@@ -172,6 +189,7 @@ function App() {
         />
       )}
     </div>
+    </ThemeProvider>
   )
 }
 

@@ -105,7 +105,7 @@ const CircularProgress = ({ pct }: { pct: number }) => {
   const dash = ((pct || 0) / 100) * circ
   return (
     <svg width="52" height="52" viewBox="0 0 52 52" className="shrink-0">
-      <circle cx="26" cy="26" r={r} fill="none" stroke="#e5e7eb" strokeWidth="5" />
+      <circle cx="26" cy="26" r={r} fill="none" stroke="var(--border-muted)" strokeWidth="5" />
       <circle
         cx="26" cy="26" r={r}
         fill="none"
@@ -117,11 +117,11 @@ const CircularProgress = ({ pct }: { pct: number }) => {
       />
       <defs>
         <linearGradient id="cpg" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="0%" stopColor="#60a5fa" />
-          <stop offset="100%" stopColor="#a78bfa" />
+          <stop offset="0%" stopColor="var(--progress-from)" />
+          <stop offset="100%" stopColor="var(--progress-to)" />
         </linearGradient>
       </defs>
-      <text x="26" y="30" textAnchor="middle" fontSize="9" fill="#374151" fontWeight="700">
+      <text x="26" y="30" textAnchor="middle" fontSize="9" fill="var(--text-primary)" fontWeight="700">
         {Math.round(pct || 0)}%
       </text>
     </svg>
@@ -165,7 +165,7 @@ const FileCard = memo(function FileCard({
 
   return (
     <div
-      className={`group relative rounded-xl overflow-hidden bg-white/60 backdrop-blur-sm shadow-sm hover:shadow-md transition-all flex flex-col cursor-pointer border-2 ${
+      className={`group relative rounded-xl overflow-hidden theme-card shadow-sm hover:shadow-md transition-all flex flex-col cursor-pointer border-2 ${
         checked ? 'border-blue-400' : 'border-transparent hover:border-blue-200'
       }`}
       onClick={onToggle}
@@ -422,7 +422,7 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
   return (
     <div className="relative flex-1 flex flex-col overflow-hidden">
       {/* â”€â”€ Top Nav Bar â”€â”€ */}
-      <div className="flex items-center gap-3 px-5 py-3 mt-16 mx-5 rounded-2xl bg-white/50 backdrop-blur-md shadow-sm shrink-0">
+      <div className="flex items-center gap-3 px-5 py-3 mt-16 mx-5 rounded-2xl theme-panel shadow-sm shrink-0">
         {/* Home */}
         <button
           onClick={handleCancelBack}
@@ -486,7 +486,7 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
             )}
           </button>
           {showFilterPanel && (
-            <div className="absolute right-0 top-full mt-1 z-30 bg-white rounded-xl shadow-lg border border-gray-100 p-3 w-56 flex flex-col gap-3">
+            <div className="absolute right-0 top-full mt-1 z-30 theme-dropdown rounded-xl shadow-lg p-3 w-56 flex flex-col gap-3">
               <div className="flex items-center justify-between">
                 <p className="text-[11px] font-semibold text-gray-500 uppercase tracking-wide">Filters</p>
                 <button onClick={() => setShowFilterPanel(false)} className="text-gray-400 hover:text-gray-600"><X size={12} /></button>
@@ -533,7 +533,7 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
       {/* â”€â”€ Body â”€â”€ */}
       <div className="flex flex-1 overflow-hidden gap-3 px-5 py-3">
         {/* Left Sidebar */}
-        <div className="w-72 shrink-0 flex flex-col rounded-2xl bg-white/50 backdrop-blur-md shadow-sm overflow-hidden">
+        <div className="w-72 shrink-0 flex flex-col rounded-2xl theme-panel shadow-sm overflow-hidden">
           {/* Sidebar Tabs */}
           <div className="flex border-b border-gray-100">
             {(['location', 'type'] as SidebarTab[]).map((tab) => (
@@ -641,7 +641,7 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
         </div>
 
         {/* â”€â”€ Right Content â”€â”€ */}
-        <div className="flex-1 flex flex-col overflow-hidden rounded-2xl bg-white/50 backdrop-blur-md shadow-sm">
+        <div className="flex-1 flex flex-col overflow-hidden rounded-2xl theme-panel shadow-sm">
           {/* Select all row */}
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-gray-100/80 shrink-0">
             {result && result.success ? (
@@ -791,7 +791,7 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
             {result && result.success && viewMode === 'list' && (
               <>
               <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-white/80 backdrop-blur-sm z-10">
+                <thead className="sticky top-0 theme-sticky z-10">
                   <tr className="text-left text-gray-400 font-semibold uppercase tracking-wider border-b border-gray-100">
                     <th className="px-3 py-2 w-6">
                       <div onClick={toggleAll} className={`w-3.5 h-3.5 rounded border cursor-pointer flex items-center justify-center ${
@@ -911,7 +911,7 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
       </div>
 
       {/* â”€â”€ Bottom Bar â”€â”€ */}
-      <div className="flex items-center gap-4 px-5 py-2.5 mx-5 mb-3 rounded-2xl bg-white/60 backdrop-blur-md shadow-sm shrink-0">
+      <div className="flex items-center gap-4 px-5 py-2.5 mx-5 mb-3 rounded-2xl theme-panel shadow-sm shrink-0">
         <CircularProgress pct={pct} />
 
         <div className="flex-1 min-w-0">
@@ -995,8 +995,8 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
 
       {/* ── Recovery Modal Overlay ── */}
       {recoverState && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/60 backdrop-blur-md rounded-2xl">
-          <div className="w-[420px] rounded-2xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+        <div className="absolute inset-0 z-50 flex items-center justify-center theme-overlay rounded-2xl">
+          <div className="w-[420px] rounded-2xl theme-modal shadow-2xl overflow-hidden">
             {/* Header */}
             <div className="px-6 py-4 bg-gradient-to-r from-blue-500 to-purple-500 text-white">
               <p className="font-bold text-base">

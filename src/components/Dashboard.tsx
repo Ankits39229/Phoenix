@@ -76,13 +76,13 @@ const Dashboard = ({ onDriveClick }: DashboardProps) => {
 
   const SectionHeader = ({ title, count }: { title: string; count?: number }) => (
     <div className="flex items-center gap-2 mb-4">
-      <h2 className="text-sm font-semibold text-blue-500 tracking-wide">
+      <h2 className="text-sm font-semibold tracking-wide" style={{ color: 'var(--section-title)' }}>
         {title}
         {count !== undefined && (
-          <span className="text-blue-400 font-normal">({count})</span>
+          <span className="font-normal" style={{ color: 'var(--section-title)', opacity: 0.7 }}>({count})</span>
         )}
       </h2>
-      <div className="flex-1 h-px bg-blue-100/60" />
+      <div className="flex-1 h-px" style={{ background: 'var(--section-line)' }} />
     </div>
   )
 
@@ -129,8 +129,7 @@ const Dashboard = ({ onDriveClick }: DashboardProps) => {
                     key: drive.name,
                     onClick: () => onDriveClick(drive),
                     content: (
-                      <div className="bg-white/55 backdrop-blur-md rounded-2xl p-4 shadow-sm flex items-center gap-4 text-left transition-shadow duration-200 group-hover:shadow-md">
-                        {/* HDD icon */}
+                      <div className="theme-card rounded-2xl p-4 shadow-sm flex items-center gap-4 text-left transition-shadow duration-200 group-hover:shadow-md">
                         <div className="shrink-0 w-12 h-12 rounded-xl bg-blue-50/80 flex items-center justify-center group-hover:bg-blue-100/80 transition-colors">
                           <HardDrive size={24} className="text-blue-400 group-hover:text-blue-500" />
                         </div>
@@ -185,7 +184,7 @@ const Dashboard = ({ onDriveClick }: DashboardProps) => {
                     onClick: () => specialFolders && onDriveClick(makeQuickAccessDrive('Desktop', specialFolders.desktop)),
                     disabled: !specialFolders,
                     content: (
-                      <div className="bg-white/55 backdrop-blur-md rounded-2xl p-4 shadow-sm flex items-center gap-4 text-left transition-shadow duration-200 group-hover:shadow-md">
+                      <div className="theme-card rounded-2xl p-4 shadow-sm flex items-center gap-4 text-left transition-shadow duration-200 group-hover:shadow-md">
                         <div className="shrink-0 w-12 h-12 rounded-xl bg-purple-50/80 flex items-center justify-center group-hover:bg-purple-100/80 transition-colors">
                           <Monitor size={24} className="text-purple-400 group-hover:text-purple-500" />
                         </div>
@@ -203,7 +202,7 @@ const Dashboard = ({ onDriveClick }: DashboardProps) => {
                     onClick: () => specialFolders && onDriveClick(makeQuickAccessDrive('Downloads', specialFolders.downloads)),
                     disabled: !specialFolders,
                     content: (
-                      <div className="bg-white/55 backdrop-blur-md rounded-2xl p-4 shadow-sm flex items-center gap-4 text-left transition-shadow duration-200 group-hover:shadow-md">
+                      <div className="theme-card rounded-2xl p-4 shadow-sm flex items-center gap-4 text-left transition-shadow duration-200 group-hover:shadow-md">
                         <div className="shrink-0 w-12 h-12 rounded-xl bg-green-50/80 flex items-center justify-center group-hover:bg-green-100/80 transition-colors">
                           <Download size={24} className="text-green-500 group-hover:text-green-600" />
                         </div>
@@ -220,7 +219,7 @@ const Dashboard = ({ onDriveClick }: DashboardProps) => {
                     key: 'select-folder',
                     onClick: handleSelectFolder,
                     content: (
-                      <div className="bg-white/55 backdrop-blur-md rounded-2xl p-4 shadow-sm flex items-center gap-4 text-left border-2 border-dashed border-gray-200/80 group-hover:border-purple-300 transition-all duration-200 group-hover:shadow-md">
+                      <div className="theme-card rounded-2xl p-4 shadow-sm flex items-center gap-4 text-left border-2 border-dashed border-gray-200/80 group-hover:border-purple-300 transition-all duration-200 group-hover:shadow-md">
                         <div className="shrink-0 w-12 h-12 rounded-xl bg-orange-50/80 flex items-center justify-center group-hover:bg-orange-100/80 transition-colors">
                           <FolderOpen size={24} className="text-orange-400 group-hover:text-orange-500" />
                         </div>
