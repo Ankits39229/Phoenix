@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Zap, ScanSearch, HardDrive, X, ChevronRight } from 'lucide-react'
+import { Zap, ScanSearch, HardDrive, X, ChevronRight, Lock } from 'lucide-react'
 import TitleBar, { NavPage } from './components/TitleBar'
 import Dashboard from './components/Dashboard'
 import ScanView from './components/ScanView'
@@ -42,12 +42,19 @@ function PreScanModal({ drive, onConfirm, onCancel }: PreScanModalProps) {
       tagline: 'Formatted or long-deleted files',
       time: 'Minutes – hours',
       icon: <ScanSearch size={20} />,
-      bullets: [
-        'Reads up to 500,000 MFT records (5× more)',
-        'Sector-by-sector file signature carving',
-        'Recovers files with no MFT trace remaining',
-        'Best for formatted drives or old deletions',
-      ],
+      bullets: drive.isBitlocker
+        ? [
+            'Reads up to 500,000 MFT records (5× more)',
+            'Sector-by-sector carving — unavailable on BitLocker drives',
+            'Orphan record detection — unavailable on BitLocker drives',
+            'Best for non-encrypted formatted drives or old deletions',
+          ]
+        : [
+            'Reads up to 500,000 MFT records (5× more)',
+            'Sector-by-sector file signature carving',
+            'Recovers files with no MFT trace remaining',
+            'Best for formatted drives or old deletions',
+          ],
       color: 'text-purple-500',
       border: 'border-purple-400',
       activeBg: 'bg-purple-50/80',
@@ -78,6 +85,22 @@ function PreScanModal({ drive, onConfirm, onCancel }: PreScanModalProps) {
         {/* Body */}
         <div className="px-6 py-5">
           <p className="text-xs text-gray-500 mb-4 font-medium uppercase tracking-wide">Choose scan mode</p>
+
+          {/* BitLocker limitation notice */}
+          {drive.isBitlocker && (
+            <div className="mb-4 flex items-start gap-2.5 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
+              <Lock size={14} className="text-amber-500 mt-0.5 shrink-0" />
+              <div>
+                <p className="text-xs font-semibold text-amber-700">BitLocker Drive — Limited Recovery</p>
+                <p className="text-[11px] text-amber-600 mt-0.5 leading-relaxed">
+                  Raw disk access is blocked on encrypted volumes. File signature carving and
+                  orphan record detection will be skipped — only MFT records visible through
+                  Windows' decryption layer will be returned. Some deleted files may not appear.
+                </p>
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col gap-3">
             {modes.map((m) => (
               <button
@@ -97,8 +120,14 @@ function PreScanModal({ drive, onConfirm, onCancel }: PreScanModalProps) {
                     <p className="text-xs text-gray-500 mb-2">{m.tagline}</p>
                     <ul className="flex flex-col gap-1">
                       {m.bullets.map((b) => (
-                        <li key={b} className="flex items-start gap-1.5 text-[11px] text-gray-500">
-                          <span className={`mt-0.5 shrink-0 ${selected === m.id ? m.color : 'text-gray-300'}`}>•</span>
+                        <li key={b} className={`flex items-start gap-1.5 text-[11px] ${
+                          drive.isBitlocker && b.includes('unavailable') ? 'text-gray-400 line-through' : 'text-gray-500'
+                        }`}>
+                          <span className={`mt-0.5 shrink-0 ${
+                            drive.isBitlocker && b.includes('unavailable')
+                              ? 'text-gray-300'
+                              : selected === m.id ? m.color : 'text-gray-300'
+                          }`}>•</span>
                           {b}
                         </li>
                       ))}

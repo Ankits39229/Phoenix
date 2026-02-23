@@ -377,6 +377,13 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
   const isScanning = progress.status === 'scanning'
   const pct = progress.progress ?? 0
 
+  // Detect when the Rust backend used the FileSystem (BitLocker-encrypted) engine.
+  // scan_mode will be "Quick-Encrypted" or "Deep-Encrypted" once the backend is rebuilt;
+  // fall back to drive.isBitlocker so the warning shows even on older binaries.
+  const isEncryptedMode = drive.isBitlocker || (result?.scan_mode ?? '').endsWith('-Encrypted')
+  // Strip the suffix for display so labels read "Quick" / "Deep" normally.
+  const displayScanMode = (result?.scan_mode ?? scanMode).replace(/-Encrypted$/, '')
+
   const handleCancelBack = () => {
     if (isScanning) window.electron.cancelScan()
     onBack()
@@ -678,6 +685,25 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
 
           {/* Content area */}
           <div className="flex-1 overflow-y-auto p-3">
+            {/* BitLocker engine notice — shown after a successful scan on an encrypted drive */}
+            {result && result.success && isEncryptedMode && (
+              <div className="mb-3 flex items-start gap-2.5 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
+                  className="w-4 h-4 text-amber-500 mt-0.5 shrink-0">
+                  <path strokeLinecap="round" strokeLinejoin="round"
+                    d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                </svg>
+                <div>
+                  <p className="text-xs font-semibold text-amber-700">BitLocker Drive — Limited Scan</p>
+                  <p className="text-[11px] text-amber-600 mt-0.5 leading-relaxed">
+                    Raw disk access is unavailable on this encrypted volume. File signature carving
+                    and orphan record detection were skipped. Only MFT records accessible through
+                    Windows&apos; decryption layer are shown — some deleted files may not appear.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Error */}
             {error && !result && (
               <div className="flex flex-col items-center justify-center h-full gap-4">
@@ -935,7 +961,7 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
             {isScanning
               ? progress.message
               : result
-              ? `${result.scan_mode || scanMode} scan • ${(result.mft_records_scanned || 0).toLocaleString()} MFT records${result.scan_mode?.toLowerCase() === 'deep' ? ` • ${(result.sectors_scanned || 0).toLocaleString()} sectors carved` : ''}`
+              ? `${displayScanMode} scan${isEncryptedMode ? ' · BitLocker (MFT only)' : ''} • ${(result.mft_records_scanned || 0).toLocaleString()} MFT records${displayScanMode.toLowerCase() === 'deep' && !isEncryptedMode ? ` • ${(result.sectors_scanned || 0).toLocaleString()} sectors carved` : ''}`
               : error || 'Ready'}
           </p>
         </div>

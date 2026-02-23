@@ -34,40 +34,53 @@ pub fn get_bitlocker_status(drive_letter: &str) -> BitLockerStatus {
         Ok(result) => {
             let stdout = String::from_utf8_lossy(&result.stdout);
             let stderr = String::from_utf8_lossy(&result.stderr);
-            
-            // Check if BitLocker is not enabled
-            if stdout.contains("Protection Off") && stdout.contains("None") {
+
+            // If manage-bde returned no output at all (e.g. ran without admin on some systems)
+            // fall back to "not encrypted / unknown" rather than misreporting.
+            if stdout.trim().is_empty() {
                 return BitLockerStatus {
                     drive: drive_with_colon,
                     is_encrypted: false,
                     is_locked: false,
-                    protection_status: "Not Encrypted".to_string(),
+                    protection_status: "Unable to determine".to_string(),
                     encryption_percentage: 0,
-                    encryption_method: "None".to_string(),
+                    encryption_method: "Unknown".to_string(),
                 };
             }
-            
-            // Parse BitLocker status
-            let is_encrypted = stdout.contains("Percentage Encrypted") && 
-                              !stdout.contains("Percentage Encrypted:    0");
-            
-            let is_locked = stdout.contains("Lock Status:            Locked") ||
-                           stderr.contains("locked");
-            
-            let protection_status = if stdout.contains("Protection Status:      Protection On") {
+
+            // Use the dedicated percentage parser — it correctly handles "0.0%", "100.0%", etc.
+            let encryption_percentage = extract_percentage(&stdout);
+
+            // A drive is NOT BitLocker-encrypted when any of these are true:
+            //   1. "BitLocker Version: … None"  — volume was never encrypted
+            //   2. "Conversion Status: … Fully Decrypted" — decryption completed
+            //   3. Parsed encryption percentage is 0
+            let bitlocker_version_none = stdout
+                .lines()
+                .any(|l| l.contains("BitLocker Version:") && l.trim_end().ends_with("None"));
+            let fully_decrypted = stdout
+                .lines()
+                .any(|l| l.contains("Conversion Status:") && l.contains("Fully Decrypted"));
+
+            let is_encrypted = !bitlocker_version_none && !fully_decrypted && encryption_percentage > 0;
+
+            // "Lock Status:" line contains "Locked" only on actually-locked volumes.
+            let is_locked = stdout
+                .lines()
+                .any(|l| l.contains("Lock Status:") && l.contains("Locked"))
+                || stderr.to_lowercase().contains("locked");
+
+            let protection_status = if stdout.contains("Protection On") {
                 "Protection On"
-            } else if stdout.contains("Protection Status:      Protection Off") {
+            } else if stdout.contains("Protection Off") {
                 "Protection Off"
             } else {
                 "Unknown"
-            }.to_string();
-            
-            // Extract encryption percentage
-            let encryption_percentage = extract_percentage(&stdout);
-            
-            // Extract encryption method
+            }
+            .to_string();
+
             let encryption_method = extract_encryption_method(&stdout);
-            
+
             BitLockerStatus {
                 drive: drive_with_colon,
                 is_encrypted,
@@ -78,7 +91,7 @@ pub fn get_bitlocker_status(drive_letter: &str) -> BitLockerStatus {
             }
         }
         Err(_) => {
-            // manage-bde not available or failed
+            // manage-bde not available or failed — assume not encrypted
             BitLockerStatus {
                 drive: drive_with_colon,
                 is_encrypted: false,

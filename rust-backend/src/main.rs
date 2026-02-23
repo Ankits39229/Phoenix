@@ -105,13 +105,21 @@ fn get_drives() -> Vec<DriveInfo> {
 /// Mode: "quick" = scan first 50K MFT records (fast), "deep" = scan 500K records (thorough)
 fn perform_scan_filesystem(drive_letter: &str, mode: &str) -> recovery_engine::RecoveryScanResult {
     let mut engine = FileSystemRecoveryEngine::new(drive_letter);
-    
+
+    // Build the scan_mode tag that the frontend uses to detect encrypted-drive limitations.
+    // Format: "Quick-Encrypted" or "Deep-Encrypted" so the UI can surface a warning that
+    // file carving and orphan detection are unavailable on BitLocker volumes.
+    let encrypted_mode_name = match mode {
+        "deep" => "Deep-Encrypted",
+        _      => "Quick-Encrypted",
+    };
+
     // Check admin first
     if !engine.check_admin() {
         return recovery_engine::RecoveryScanResult {
             success: false,
             message: "Administrator privileges required. Please run as Administrator.".to_string(),
-            scan_mode: mode.to_string(),
+            scan_mode: encrypted_mode_name.to_string(),
             drive: drive_letter.to_string(),
             bitlocker_status: Some(engine.check_bitlocker()),
             mft_entries: Vec::new(),
@@ -133,7 +141,7 @@ fn perform_scan_filesystem(drive_letter: &str, mode: &str) -> recovery_engine::R
         return recovery_engine::RecoveryScanResult {
             success: false,
             message: "Drive is BitLocker encrypted and locked. Please unlock with password or recovery key.".to_string(),
-            scan_mode: mode.to_string(),
+            scan_mode: encrypted_mode_name.to_string(),
             drive: drive_letter.to_string(),
             bitlocker_status: Some(bl_status),
             mft_entries: Vec::new(),
@@ -189,8 +197,13 @@ fn perform_scan_filesystem(drive_letter: &str, mode: &str) -> recovery_engine::R
             
             recovery_engine::RecoveryScanResult {
                 success: true,
-                message: format!("{} (FileSystem Mode - Decrypted)", fs_result.message),
-                scan_mode: "FileSystem".to_string(),
+                message: format!(
+                    "{}. Note: file signature carving and orphan detection are unavailable \
+                     on BitLocker-encrypted volumes — only MFT records accessible through \
+                     Windows' decryption layer are shown.",
+                    fs_result.message
+                ),
+                scan_mode: encrypted_mode_name.to_string(),
                 drive: fs_result.drive,
                 bitlocker_status: fs_result.bitlocker_status,
                 mft_entries,
@@ -208,7 +221,7 @@ fn perform_scan_filesystem(drive_letter: &str, mode: &str) -> recovery_engine::R
         Err(e) => recovery_engine::RecoveryScanResult {
             success: false,
             message: format!("FileSystem scan failed: {}", e),
-            scan_mode: "FileSystem".to_string(),
+            scan_mode: encrypted_mode_name.to_string(),
             drive: drive_letter.to_string(),
             bitlocker_status: Some(bl_status),
             mft_entries: Vec::new(),
