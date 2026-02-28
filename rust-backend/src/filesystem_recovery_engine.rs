@@ -274,10 +274,14 @@ impl FileSystemRecoveryEngine {
             Ok(usn_deleted) => {
                 eprintln!("DEBUG [USN]: Found {} deleted files in USN journal", usn_deleted.len());
                 
-                // Deduplicate: only add files not already in results
-                let existing_mft_records: std::collections::HashSet<u64> = mft_entries.iter()
+                // Deduplicate: only skip USN entries whose MFT record was already
+                // found as DELETED in the MFT scan.  If the MFT scan has the record
+                // as *active* (is_deleted == false), it means the slot was reused by
+                // a new file — the USN-deleted file is a different file and should be
+                // added.  Build a set of MFT records that are already deleted entries.
+                let existing_deleted_records: std::collections::HashSet<u64> = mft_entries.iter()
+                    .filter(|f| f.is_deleted)
                     .map(|f| {
-                        // Extract MFT record from ID like "fs_mft_12345"
                         f.id.strip_prefix("fs_mft_").and_then(|s| s.parse().ok()).unwrap_or(0)
                     })
                     .collect();
@@ -285,8 +289,8 @@ impl FileSystemRecoveryEngine {
                 let mut usn_added = 0;
                 let mut seen_usn_records: std::collections::HashSet<u64> = std::collections::HashSet::new();
                 for usn_file in &usn_deleted {
-                    // Skip if this MFT record already has an entry from the MFT scan
-                    if existing_mft_records.contains(&usn_file.mft_record) {
+                    // Skip only if we already have a *deleted* entry for this record
+                    if existing_deleted_records.contains(&usn_file.mft_record) {
                         continue;
                     }
                     // Skip if we already added this MFT record from an earlier USN event
@@ -1027,6 +1031,14 @@ fn mft_entry_to_recoverable_with_path(
     //     }
     // }
 
+    // Detect files in the Recycle Bin — they were deleted by the user even
+    // though the MFT record is still marked "in use".
+    let is_recycle_bin = full_path.to_lowercase().contains("$recycle.bin");
+    let final_is_deleted = entry.is_deleted || is_recycle_bin;
+    
+    // Adjust recovery chance for Recycle Bin files (higher since data is intact)
+    let final_recovery_chance = if is_recycle_bin && !entry.is_deleted { 95 } else { recovery_chance };
+    
     Some(RecoverableFileFS {
         id: format!("fs_mft_{}", entry.record_number),
         name: entry.file_name.clone(),
@@ -1037,8 +1049,8 @@ fn mft_entry_to_recoverable_with_path(
         file_type,
         modified,
         created,
-        is_deleted: entry.is_deleted,
-        recovery_chance,
+        is_deleted: final_is_deleted,
+        recovery_chance: final_recovery_chance,
         source: "mft_filesystem".to_string(),
         cluster_offset,
         data_runs: Some(data_runs_json),

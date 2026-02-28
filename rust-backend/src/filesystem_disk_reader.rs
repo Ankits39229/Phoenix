@@ -342,6 +342,26 @@ impl FileSystemDiskReader {
                 bytes_returned, header_size + record_length));
         }
         
+        // CRITICAL: Verify the returned FileReferenceNumber matches what we requested.
+        // FSCTL_GET_NTFS_FILE_RECORD returns the nearest IN-USE record when the
+        // requested one is freed (deleted).  If the returned record differs from
+        // what we asked for, the slot is freed → treat as error so we don't
+        // parse a different file's data under the wrong record number.
+        if bytes_returned >= 8 {
+            let returned_ref = u64::from_le_bytes([
+                output_buffer[0], output_buffer[1], output_buffer[2], output_buffer[3],
+                output_buffer[4], output_buffer[5], output_buffer[6], output_buffer[7],
+            ]);
+            // Lower 48 bits = record number, upper 16 bits = sequence number
+            let returned_record_num = returned_ref & 0x0000_FFFF_FFFF_FFFF;
+            if returned_record_num != record_number {
+                return Err(format!(
+                    "FSCTL returned record {} instead of requested {} (slot freed/deleted)",
+                    returned_record_num, record_number
+                ));
+            }
+        }
+        
         // The actual MFT record data starts at offset 12 (after FileReferenceNumber + FileRecordLength)
         let end = header_size + record_length.min(self.mft_record_size as usize);
         let record_data = output_buffer[header_size..end].to_vec();
