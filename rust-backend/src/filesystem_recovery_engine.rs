@@ -129,7 +129,7 @@ impl FileSystemRecoveryEngine {
     /// Perform MFT scan using file system APIs
     /// 
     /// Parameters:
-    /// - max_records: Maximum number of MFT records to scan (10K for quick, 50K for deep)
+    /// - max_records: Maximum number of MFT records to scan (None = scan all)
     /// - hours_limit: Optional flag to indicate quick scan mode (not used for filtering, just logging)
     pub fn scan_mft(&mut self, max_records: Option<usize>, hours_limit: Option<u64>) -> Result<FileSystemScanResult, String> {
         let start_time = std::time::Instant::now();
@@ -150,13 +150,13 @@ impl FileSystemRecoveryEngine {
         let mut deleted_count_scan = 0u64;
         
         // Calculate scan limit based on mode
-        // IMPORTANT: Limit to prevent massive JSON responses
-        let max_limit = max_records.unwrap_or(50000); // Default to 50K max
+        // FileSystem API mode is fast (reads through Windows), so we use higher
+        // limits than raw-disk mode. But we still cap output to prevent OOM/IPC crashes.
+        let max_limit = max_records.unwrap_or(500_000);
         let mft_total = reader.get_mft_total_records().unwrap_or(0);
         
         let limit = if mft_total > 0 {
-            // Cap at max_limit to prevent memory issues
-            std::cmp::min(mft_total, max_limit as u64) as usize
+            std::cmp::min(mft_total as usize, max_limit)
         } else {
             max_limit
         };
@@ -167,9 +167,10 @@ impl FileSystemRecoveryEngine {
         eprintln!("DEBUG [FS]: MFT has {} total records, scanning up to {}", mft_total, limit);
         
         let mut record_num = 0u64;
-        // Increased from 100 to 5000 - MFT can have large gaps of zeroed records
+        // MFT can have very large gaps of zeroed/unallocated records.
+        // Use a generous tolerance so we don't bail out prematurely.
         let mut consecutive_failures = 0;
-        let max_consecutive_failures = 5000;
+        let max_consecutive_failures = 20_000;
         
         // Collect all entries first
         let mut parsed_entries: Vec<MftEntry> = Vec::new();
@@ -458,6 +459,22 @@ impl FileSystemRecoveryEngine {
         }
         
         eprintln!("DEBUG [FS]: Filtered to {} recoverable files (removed 0-byte, temp files, unrecoverable)", mft_entries.len());
+
+        // ── Hard cap on output ────────────────────────────────────────────
+        // Cap total results to prevent massive JSON that crashes IPC / OOM.
+        // Always keep ALL deleted files; truncate non-deleted if over limit.
+        const MAX_OUTPUT: usize = 200_000;
+        if mft_entries.len() > MAX_OUTPUT {
+            let deleted_count = mft_entries.iter().filter(|f| f.is_deleted).count();
+            eprintln!("DEBUG [FS]: Capping output from {} to {} entries ({} deleted kept)", mft_entries.len(), MAX_OUTPUT, deleted_count);
+
+            // Partition: deleted first, then non-deleted
+            let (mut deleted, mut active): (Vec<_>, Vec<_>) = mft_entries.into_iter().partition(|f| f.is_deleted);
+            let remaining = MAX_OUTPUT.saturating_sub(deleted.len());
+            active.truncate(remaining);
+            deleted.append(&mut active);
+            mft_entries = deleted;
+        }
 
         let duration = start_time.elapsed();
         

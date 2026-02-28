@@ -158,11 +158,14 @@ fn perform_scan_filesystem(drive_letter: &str, mode: &str) -> recovery_engine::R
     }
     
     // Perform filesystem scan with mode-specific parameters.
-    // Quick: 50K MFT records  →  seconds, finds recently deleted files.
-    // Deep:  500K MFT records →  thorough, surfaces older deleted entries.
+    // FileSystem API reads through Windows' decryption layer and is much faster
+    // than raw disk access, so we can afford higher limits than raw-disk mode.
+    // Quick: 250K MFT records  →  ~10-20s, finds user files in common folders.
+    // Deep:  500K MFT records  →  thorough, covers most user files on the drive.
+    // We cap at 500K to keep JSON output under ~150MB (avoidable OOM / IPC crash).
     let (max_records, hours_limit): (Option<usize>, Option<u64>) = match mode {
         "deep" => (Some(500_000), None),
-        _      => (Some(50_000),  Some(24)),
+        _      => (Some(250_000), Some(24)),
     };
 
     eprintln!("[Main]: {} scan — scanning up to {} MFT records", mode, max_records.unwrap());

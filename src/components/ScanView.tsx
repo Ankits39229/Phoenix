@@ -240,7 +240,7 @@ const ScanView = ({ drive, scanMode = 'quick', focusImportant = false, onBack }:
 
   // Filter panel
   const [showFilterPanel, setShowFilterPanel] = useState(false)
-  const [filterDeletedOnly, setFilterDeletedOnly] = useState(true)
+  const [filterDeletedOnly, setFilterDeletedOnly] = useState(false)
   const [filterMinRecovery, setFilterMinRecovery] = useState(0)
   const [importantFoldersOnly, setImportantFoldersOnly] = useState(
     focusImportant && drive.name.replace(':', '').toUpperCase() === 'C'
@@ -249,6 +249,16 @@ const ScanView = ({ drive, scanMode = 'quick', focusImportant = false, onBack }:
   // File Location sidebar
   const [folderTree, setFolderTree] = useState<{ path: string; name: string; count: number }[]>([])
   const [sidebarFolderPath, setSidebarFolderPath] = useState<string | null>(null)
+
+  // When importantFoldersOnly is active, show only folders inside known important paths
+  const displayedFolderTree = useMemo(() => {
+    if (!importantFoldersOnly) return folderTree
+    const importantNames = ['desktop', 'downloads', 'documents', 'pictures', 'videos', 'music', 'onedrive']
+    return folderTree.filter((folder) => {
+      const p = folder.path.toLowerCase().replace(/\\/g, '/')
+      return importantNames.some((n) => p.includes(`/${n}/`) || p.endsWith(`/${n}`))
+    })
+  }, [folderTree, importantFoldersOnly])
 
   // Debounced search — only re-filter after user stops typing for 200ms
   const [searchQuery, setSearchQuery] = useState('')
@@ -486,14 +496,14 @@ const ScanView = ({ drive, scanMode = 'quick', focusImportant = false, onBack }:
           <button
             onClick={() => setShowFilterPanel((p) => !p)}
             className={`flex items-center gap-1.5 text-xs rounded-lg px-2.5 py-1.5 transition-all ${
-              !filterDeletedOnly || filterMinRecovery > 0
+              filterDeletedOnly || filterMinRecovery > 0
                 ? 'bg-blue-100 text-blue-600 hover:bg-blue-200'
                 : 'text-gray-500 hover:text-gray-700 bg-gray-100/60 hover:bg-gray-100'
             }`}
           >
             <SlidersHorizontal size={12} />
             Filter
-            {(!filterDeletedOnly || filterMinRecovery > 0) && (
+            {(filterDeletedOnly || filterMinRecovery > 0) && (
               <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
             )}
           </button>
@@ -522,8 +532,8 @@ const ScanView = ({ drive, scanMode = 'quick', focusImportant = false, onBack }:
                   ))}
                 </div>
               </div>
-              {(!filterDeletedOnly || filterMinRecovery > 0) && (
-                <button onClick={() => { setFilterDeletedOnly(true); setFilterMinRecovery(0); setPage(1) }}
+              {(filterDeletedOnly || filterMinRecovery > 0) && (
+                <button onClick={() => { setFilterDeletedOnly(false); setFilterMinRecovery(0); setPage(1) }}
                   className="text-[11px] text-red-400 hover:text-red-600 text-left">Reset filters</button>
               )}
             </div>
@@ -602,6 +612,13 @@ const ScanView = ({ drive, scanMode = 'quick', focusImportant = false, onBack }:
                     {isScanning ? 'Building folder tree...' : result?.success ? 'No folders found' : 'Run a scan to see folders'}
                   </p>
                 </div>
+              ) : displayedFolderTree.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full py-12 gap-3">
+                  <FolderOpen size={28} className="text-gray-300" />
+                  <p className="text-xs text-gray-400 text-center px-4">
+                    No important folders found in scan results
+                  </p>
+                </div>
               ) : (
                 <>
                   {sidebarFolderPath && (
@@ -612,7 +629,7 @@ const ScanView = ({ drive, scanMode = 'quick', focusImportant = false, onBack }:
                       <X size={10} /> Clear folder filter
                     </button>
                   )}
-                  {folderTree.map((folder) => {
+                  {displayedFolderTree.map((folder) => {
                     const active = sidebarFolderPath === folder.path
                     return (
                       <button
