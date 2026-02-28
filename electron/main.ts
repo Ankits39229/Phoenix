@@ -127,8 +127,8 @@ ipcMain.handle('get-files-page', (_event, opts: {
   if (!lastScanResult) return { files: [], total: 0, counts: {}, startIndex: 0 };
   const { page, pageSize } = opts;
 
-  // Category counts use folder filter only (no category/search/deleted filter applied)
-  const folderCounted = getFilteredFiles({ ...opts, category: null, search: '', deletedOnly: false, minRecovery: 0 });
+  // Category counts use folder filter + deletedOnly filter but no category/search filter
+  const folderCounted = getFilteredFiles({ ...opts, category: null, search: '', minRecovery: 0 });
   const counts: Record<string, number> = {};
   for (const f of folderCounted) {
     const cat = fileCat(f);

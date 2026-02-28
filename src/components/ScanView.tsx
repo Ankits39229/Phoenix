@@ -239,7 +239,7 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
 
   // Filter panel
   const [showFilterPanel, setShowFilterPanel] = useState(false)
-  const [filterDeletedOnly, setFilterDeletedOnly] = useState(false)
+  const [filterDeletedOnly, setFilterDeletedOnly] = useState(true)
   const [filterMinRecovery, setFilterMinRecovery] = useState(0)
 
   // File Location sidebar
@@ -481,14 +481,14 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
           <button
             onClick={() => setShowFilterPanel((p) => !p)}
             className={`flex items-center gap-1.5 text-xs rounded-lg px-2.5 py-1.5 transition-all ${
-              filterDeletedOnly || filterMinRecovery > 0
+              !filterDeletedOnly || filterMinRecovery > 0
                 ? 'bg-blue-100 text-blue-600 hover:bg-blue-200'
                 : 'text-gray-500 hover:text-gray-700 bg-gray-100/60 hover:bg-gray-100'
             }`}
           >
             <SlidersHorizontal size={12} />
             Filter
-            {(filterDeletedOnly || filterMinRecovery > 0) && (
+            {(!filterDeletedOnly || filterMinRecovery > 0) && (
               <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
             )}
           </button>
@@ -517,9 +517,9 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
                   ))}
                 </div>
               </div>
-              {(filterDeletedOnly || filterMinRecovery > 0) && (
-                <button onClick={() => { setFilterDeletedOnly(false); setFilterMinRecovery(0); setPage(1) }}
-                  className="text-[11px] text-red-400 hover:text-red-600 text-left">Clear filters</button>
+              {(!filterDeletedOnly || filterMinRecovery > 0) && (
+                <button onClick={() => { setFilterDeletedOnly(true); setFilterMinRecovery(0); setPage(1) }}
+                  className="text-[11px] text-red-400 hover:text-red-600 text-left">Reset filters</button>
               )}
             </div>
           )}
