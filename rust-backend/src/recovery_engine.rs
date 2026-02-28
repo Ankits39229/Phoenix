@@ -679,8 +679,21 @@ impl RecoveryEngine {
         
         // Save recovered file
         save_carved_file(&file_data, destination)?;
+
+        // Integrity check: validate file header matches expected type
+        let ext = file.extension.to_lowercase();
+        let corruption_warning = crate::filesystem_recovery_engine::detect_corruption(&file_data, &ext);
+
+        if let Some(ref warning) = corruption_warning {
+            eprintln!("[Recovery] WARNING: '{}' may be corrupt: {}", file.name, warning);
+        }
         
-        let message = if partial_recovery {
+        let message = if let Some(ref warning) = corruption_warning {
+            format!(
+                "Recovered {} bytes but file may be corrupt: {}",
+                file_data.len(), warning
+            )
+        } else if partial_recovery {
             format!(
                 "Partially recovered {} of {} bytes ({:.1}% recovered). {} runs succeeded, {} failed.", 
                 file_data.len(), 
@@ -694,7 +707,7 @@ impl RecoveryEngine {
         };
         
         Ok(FileRecoveryResult {
-            success: true,
+            success: corruption_warning.is_none(),
             source_path: file.path.clone(),
             destination_path: destination.to_string(),
             bytes_recovered: file_data.len() as u64,
@@ -1073,16 +1086,53 @@ pub fn recover_file(
             }
         }),
         "USN" | "mft_filesystem" => {
-            // USN and filesystem MFT files use the same data_runs based recovery as MFT
-            engine.recover_from_mft(&file, destination).unwrap_or_else(|e| {
-                FileRecoveryResult {
+            // USN and filesystem MFT files were scanned through the FileSystem
+            // API (Windows volume handle with BitLocker auto-decryption).
+            // Their data-run cluster offsets are logical volume offsets, NOT raw
+            // disk offsets, so we MUST use FileSystemRecoveryEngine to read them
+            // correctly — otherwise the recovered data will be encrypted/corrupt.
+            let fs_file = crate::filesystem_recovery_engine::RecoverableFileFS {
+                id: file.id.clone(),
+                name: file.name.clone(),
+                path: file.path.clone(),
+                size: file.size,
+                extension: file.extension.clone(),
+                category: file.category.clone(),
+                file_type: file.file_type.clone(),
+                modified: file.modified.clone(),
+                created: file.created.clone(),
+                is_deleted: file.is_deleted,
+                recovery_chance: file.recovery_chance,
+                source: file.source.clone(),
+                cluster_offset: file.cluster_offset,
+                data_runs: file.data_runs.clone(),
+            };
+            let mut fs_engine = crate::filesystem_recovery_engine::FileSystemRecoveryEngine::new(drive_letter);
+            if let Err(e) = fs_engine.initialize() {
+                return FileRecoveryResult {
+                    success: false,
+                    source_path: file.path,
+                    destination_path: destination.to_string(),
+                    bytes_recovered: 0,
+                    message: format!("Failed to initialize filesystem recovery engine: {}", e),
+                };
+            }
+            match fs_engine.recover_file(&fs_file, destination) {
+                Ok(fs_result) => FileRecoveryResult {
+                    success: fs_result.success,
+                    source_path: fs_result.source_path,
+                    destination_path: fs_result.destination_path,
+                    bytes_recovered: fs_result.bytes_recovered,
+                    message: fs_result.message,
+                },
+                Err(e) => FileRecoveryResult {
                     success: false,
                     source_path: file.path,
                     destination_path: destination.to_string(),
                     bytes_recovered: 0,
                     message: e,
-                }
-            })
+                },
+            }
         },
         _ => FileRecoveryResult {
             success: false,

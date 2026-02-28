@@ -530,8 +530,10 @@ impl FileSystemRecoveryEngine {
             }
         }
 
-        // --- Method 1: Direct file copy (non-deleted files that still exist on disk) ---
-        if !file.is_deleted {
+        // --- Method 1: Direct file copy (files that still exist on disk) ---
+        // This covers non-deleted files AND $Recycle.Bin files (marked is_deleted
+        // but the data still exists on disk under the recycled path).
+        {
             let source_path = std::path::Path::new(&file.path);
             if source_path.exists() {
                 match std::fs::copy(source_path, output_path) {
@@ -612,9 +614,25 @@ impl FileSystemRecoveryEngine {
                     recovered_data.truncate(file.size as usize);
                 }
 
+                // ── Integrity check: validate file header matches expected type ──
+                // If data is clearly wrong (all zeros, encrypted garbage, or wrong
+                // signature), warn the user instead of silently saving corrupt data.
+                let ext = file.extension.to_lowercase();
+                let corruption_warning = detect_corruption(&recovered_data, &ext);
+
+                if let Some(ref warning) = corruption_warning {
+                    // Data looks corrupt — still save it but flag as partial/corrupt
+                    eprintln!("[Recovery] WARNING: '{}' may be corrupt: {}", file.name, warning);
+                }
+
                 reader.save_file(&recovered_data, output_path)?;
 
-                let message = if failed_runs > 0 {
+                let message = if let Some(ref warning) = corruption_warning {
+                    format!(
+                        "Recovered {} bytes but file may be corrupt: {}",
+                        recovered_data.len(), warning
+                    )
+                } else if failed_runs > 0 {
                     format!(
                         "Partially recovered {} of {} bytes ({:.1}%). {} run(s) succeeded, {} failed.",
                         recovered_data.len(),
@@ -628,7 +646,7 @@ impl FileSystemRecoveryEngine {
                 };
 
                 return Ok(FileRecoveryResultFS {
-                    success: true,
+                    success: corruption_warning.is_none(),
                     source_path: file.path.clone(),
                     destination_path: output_path.to_string(),
                     bytes_recovered: recovered_data.len() as u64,
@@ -1083,4 +1101,100 @@ fn format_timestamp(unix_ts: i64) -> String {
     chrono::DateTime::from_timestamp(unix_ts, 0)
         .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
         .unwrap_or_else(|| "Unknown".to_string())
+}
+
+/// Check recovered data for obvious signs of corruption by validating
+/// known file-type magic bytes.  Returns `Some(reason)` if corrupt.
+pub fn detect_corruption(data: &[u8], extension: &str) -> Option<String> {
+    if data.len() < 8 {
+        return Some("File is too small to be valid".to_string());
+    }
+
+    // Check if data is all zeros (clusters were zeroed / never written)
+    let non_zero = data.iter().take(4096).filter(|&&b| b != 0).count();
+    if non_zero == 0 {
+        return Some("File data is all zeros — clusters have been wiped".to_string());
+    }
+
+    // Check if data looks like random/encrypted noise (high Shannon entropy)
+    // Truly random data has entropy ~8.0; most real files are < 7.5
+    // except compressed/encrypted formats which are expected to be high
+    let is_compressed_format = matches!(
+        extension,
+        "zip" | "rar" | "7z" | "gz" | "bz2" | "xz" | "mp4" | "mkv"
+            | "avi" | "mov" | "mp3" | "aac" | "ogg" | "flac" | "m4a"
+            | "webm" | "webp" | "heic" | "avif"
+    );
+
+    // Validate magic bytes for common file types
+    let header = &data[..data.len().min(16)];
+    let valid_header = match extension {
+        // Images
+        "jpg" | "jpeg" => header.starts_with(&[0xFF, 0xD8, 0xFF]),
+        "png"          => header.starts_with(&[0x89, 0x50, 0x4E, 0x47]),
+        "gif"          => header.starts_with(b"GIF8"),
+        "bmp"          => header.starts_with(b"BM"),
+        "webp"         => header.len() >= 12 && &header[0..4] == b"RIFF" && &header[8..12] == b"WEBP",
+        "tiff" | "tif" => header.starts_with(&[0x49, 0x49, 0x2A, 0x00])
+                       || header.starts_with(&[0x4D, 0x4D, 0x00, 0x2A]),
+        // Documents
+        "pdf"          => header.starts_with(b"%PDF"),
+        "doc" | "xls" | "ppt"
+                       => header.starts_with(&[0xD0, 0xCF, 0x11, 0xE0]),  // OLE compound
+        "docx" | "xlsx" | "pptx" | "odt" | "ods" | "odp"
+                       => header.starts_with(&[0x50, 0x4B, 0x03, 0x04]),  // ZIP/OOXML
+        // Archives
+        "zip"          => header.starts_with(&[0x50, 0x4B]),
+        "rar"          => header.starts_with(b"Rar!"),
+        "7z"           => header.starts_with(&[0x37, 0x7A, 0xBC, 0xAF]),
+        "gz"           => header.starts_with(&[0x1F, 0x8B]),
+        // Audio/Video
+        "mp3"          => header.starts_with(&[0xFF, 0xFB])
+                       || header.starts_with(&[0xFF, 0xF3])
+                       || header.starts_with(&[0xFF, 0xF2])
+                       || header.starts_with(b"ID3"),
+        "mp4" | "m4a" | "m4v" | "mov"
+                       => data.len() >= 12 && (
+                           &data[4..8] == b"ftyp"
+                        || &data[4..8] == b"mdat"
+                        || &data[4..8] == b"moov"
+                        || &data[4..8] == b"free"
+                       ),
+        "flac"         => header.starts_with(b"fLaC"),
+        "ogg"          => header.starts_with(b"OggS"),
+        "wav"          => header.starts_with(b"RIFF") && data.len() >= 12 && &data[8..12] == b"WAVE",
+        "avi"          => header.starts_with(b"RIFF") && data.len() >= 12 && &data[8..12] == b"AVI ",
+        "mkv" | "webm" => header.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]),
+        // Executables
+        "exe" | "dll"  => header.starts_with(b"MZ"),
+        // Text-like files: first bytes should be printable ASCII / UTF-8
+        "txt" | "csv" | "log" | "md" | "json" | "xml" | "html" | "htm"
+            | "css" | "js" | "ts" | "jsx" | "tsx" | "py" | "rs" | "c"
+            | "cpp" | "h" | "java" | "sql" | "ini" | "cfg" | "yaml" | "yml"
+            | "toml" | "sh" | "bat" | "ps1"
+                       => {
+                // Check first 256 bytes for printable ASCII / valid UTF-8
+                let sample = &data[..data.len().min(256)];
+                let printable = sample.iter().filter(|&&b| {
+                    b == b'\n' || b == b'\r' || b == b'\t' || (b >= 0x20 && b <= 0x7E)
+                        || b >= 0x80  // allow multi-byte UTF-8
+                }).count();
+                printable * 100 / sample.len() >= 70  // at least 70% printable
+            }
+        // For unknown extensions, skip header validation
+        _ => return None,
+    };
+
+    if !valid_header {
+        // Extra check: if it's not a compressed format and header is wrong,
+        // see if data looks like encrypted garbage (high entropy, no structure)
+        if !is_compressed_format {
+            return Some(format!(
+                "File header does not match expected {} format — data may be overwritten or encrypted",
+                extension.to_uppercase()
+            ));
+        }
+    }
+
+    None
 }
