@@ -62,10 +62,11 @@ interface FilterOpts {
   deletedOnly?: boolean;
   minRecovery?: number;
   folderPath?: string | null;
+  importantFoldersOnly?: boolean;
 }
 function getFilteredFiles(opts: FilterOpts): any[] {
   if (!lastScanResult) return [];
-  const { driveLetter, category, search, deletedOnly, minRecovery, folderPath } = opts;
+  const { driveLetter, category, search, deletedOnly, minRecovery, folderPath, importantFoldersOnly } = opts;
 
   const activeFolderFilter = folderPath
     ? folderPath.replace(/\\/g, '/').toLowerCase()
@@ -110,6 +111,18 @@ function getFilteredFiles(opts: FilterOpts): any[] {
   if (deletedOnly) filtered = filtered.filter((f) => f.is_deleted);
   if (minRecovery && minRecovery > 0) filtered = filtered.filter((f) => (f.recovery_chance || 0) >= minRecovery);
 
+  // Important folders filter — C: drive only: Desktop, Downloads, Documents, Pictures, Videos, Music
+  if (importantFoldersOnly) {
+    const home = os.homedir().replace(/\\/g, '/').toLowerCase();
+    const importantDirs = ['desktop', 'downloads', 'documents', 'pictures', 'videos', 'music', 'onedrive'];
+    const importantPaths = importantDirs.map((d) => `${home}/${d}`);
+    filtered = filtered.filter((f) => {
+      const fp = (f.path || '').replace(/\\/g, '/').toLowerCase();
+      if (fp.includes('$recycle.bin')) return true;
+      return importantPaths.some((p) => fp.startsWith(p));
+    });
+  }
+
   return filtered;
 }
 
@@ -123,6 +136,7 @@ ipcMain.handle('get-files-page', (_event, opts: {
   deletedOnly?: boolean;
   minRecovery?: number;
   folderPath?: string | null;
+  importantFoldersOnly?: boolean;
 }) => {
   if (!lastScanResult) return { files: [], total: 0, counts: {}, startIndex: 0 };
   const { page, pageSize } = opts;
@@ -177,6 +191,7 @@ ipcMain.handle('recover-files-filtered', async (_event, opts: {
   deletedOnly?: boolean;
   minRecovery?: number;
   folderPath?: string | null;
+  importantFoldersOnly?: boolean;
   destFolder: string;
 }) => {
   const { destFolder } = opts;

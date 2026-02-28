@@ -45,6 +45,7 @@ type ViewMode = 'grid' | 'list' | 'detail'
 interface ScanViewProps {
   drive: DriveInfo
   scanMode?: 'quick' | 'deep'
+  focusImportant?: boolean
   onBack: () => void
 }
 
@@ -219,7 +220,7 @@ const FileCard = memo(function FileCard({
   )
 })
 
-const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
+const ScanView = ({ drive, scanMode = 'quick', focusImportant = false, onBack }: ScanViewProps) => {
   const [progress, setProgress] = useState<ScanProgress>({
     status: 'scanning',
     message: 'Initializing scan...',
@@ -241,6 +242,9 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
   const [showFilterPanel, setShowFilterPanel] = useState(false)
   const [filterDeletedOnly, setFilterDeletedOnly] = useState(true)
   const [filterMinRecovery, setFilterMinRecovery] = useState(0)
+  const [importantFoldersOnly, setImportantFoldersOnly] = useState(
+    focusImportant && drive.name.replace(':', '').toUpperCase() === 'C'
+  )
 
   // File Location sidebar
   const [folderTree, setFolderTree] = useState<{ path: string; name: string; count: number }[]>([])
@@ -299,7 +303,7 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
         const res = await window.electron.recoverFilesFiltered({
           driveLetter: drive.letter, category: selectedCategory, search: debouncedSearch,
           deletedOnly: filterDeletedOnly, minRecovery: filterMinRecovery,
-          folderPath: sidebarFolderPath, destFolder,
+          folderPath: sidebarFolderPath, destFolder, importantFoldersOnly,
         })
         cleanup()
         setRecoverState((prev) => prev ? { ...prev, phase: 'done', recovered: res.recovered, failed: res.failed, results: res.results, percent: 100 } : null)
@@ -342,7 +346,7 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
   const [selectedFiles, setSelectedFiles] = useState<Map<string, RecoverableFile>>(new Map())
 
   // Reset page when any filter changes
-  useEffect(() => { setPage(1) }, [selectedCategory, debouncedSearch, filterDeletedOnly, filterMinRecovery, sidebarFolderPath])
+  useEffect(() => { setPage(1) }, [selectedCategory, debouncedSearch, filterDeletedOnly, filterMinRecovery, sidebarFolderPath, importantFoldersOnly])
 
   // Fetch folder tree once scan finishes
   useEffect(() => {
@@ -362,13 +366,14 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
       deletedOnly: filterDeletedOnly,
       minRecovery: filterMinRecovery,
       folderPath: sidebarFolderPath,
+      importantFoldersOnly,
     }).then((newResult) => {
       setPageResult(newResult)
       // page===1 means a fresh load (filter changed or initial) → replace the list.
       // page>1 means the user clicked "Load more" → append the new batch.
       setDisplayedFiles((prev) => page === 1 ? newResult.files : [...prev, ...newResult.files])
     })
-  }, [result?.success, drive.letter, selectedCategory, debouncedSearch, page, PAGE_SIZE, filterDeletedOnly, filterMinRecovery, sidebarFolderPath])
+  }, [result?.success, drive.letter, selectedCategory, debouncedSearch, page, PAGE_SIZE, filterDeletedOnly, filterMinRecovery, sidebarFolderPath, importantFoldersOnly])
 
   const pagedFiles = displayedFiles
   const categoryCounts = pageResult.counts as Record<FileCategory, number>
@@ -701,6 +706,23 @@ const ScanView = ({ drive, scanMode = 'quick', onBack }: ScanViewProps) => {
                     Windows&apos; decryption layer are shown — some deleted files may not appear.
                   </p>
                 </div>
+              </div>
+            )}
+
+            {/* Important folders banner */}
+            {importantFoldersOnly && (
+              <div className="mb-3 flex items-center gap-2.5 rounded-xl bg-blue-50 border border-blue-200 px-4 py-2.5">
+                <FolderOpen size={14} className="text-blue-500 shrink-0" />
+                <p className="text-xs text-blue-700 flex-1">
+                  Showing <span className="font-semibold">important folders only</span> — Desktop, Downloads, Documents, Pictures, Videos, Music
+                </p>
+                <button
+                  onClick={() => { setImportantFoldersOnly(false); setPage(1) }}
+                  className="text-blue-400 hover:text-blue-600 transition-colors"
+                  title="Show all locations"
+                >
+                  <X size={13} />
+                </button>
               </div>
             )}
 

@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('electron', {
     deletedOnly?: boolean;
     minRecovery?: number;
     folderPath?: string | null;
+    importantFoldersOnly?: boolean;
   }) => ipcRenderer.invoke('get-files-page', opts),
   getFolderTree: (driveLetter: string) => ipcRenderer.invoke('get-folder-tree', driveLetter),
   recoverFilesFiltered: (opts: {
@@ -37,6 +38,7 @@ contextBridge.exposeInMainWorld('electron', {
     deletedOnly?: boolean;
     minRecovery?: number;
     folderPath?: string | null;
+    importantFoldersOnly?: boolean;
     destFolder: string;
   }) => ipcRenderer.invoke('recover-files-filtered', opts),
   onRecoverProgress: (callback: (data: any) => void) => {

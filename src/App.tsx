@@ -12,12 +12,14 @@ export type ScanMode = 'quick' | 'deep'
 
 interface PreScanModalProps {
   drive: DriveInfo
-  onConfirm: (mode: ScanMode) => void
+  onConfirm: (mode: ScanMode, focusImportant: boolean) => void
   onCancel: () => void
 }
 
 function PreScanModal({ drive, onConfirm, onCancel }: PreScanModalProps) {
   const [selected, setSelected] = useState<ScanMode>('quick')
+  const isCDrive = drive.name.replace(':', '').toUpperCase() === 'C'
+  const [focusImportant, setFocusImportant] = useState(isCDrive)
 
   const modes: { id: ScanMode; label: string; tagline: string; time: string; icon: React.ReactNode; bullets: string[]; color: string; border: string; activeBg: string }[] = [
     {
@@ -139,6 +141,38 @@ function PreScanModal({ drive, onConfirm, onCancel }: PreScanModalProps) {
           </div>
         </div>
 
+        {/* C: drive — important folders focus toggle */}
+        {isCDrive && (
+          <div className="px-6 pb-1">
+            <div
+              className={`rounded-xl border-2 p-3.5 cursor-pointer transition-all select-none ${
+                focusImportant ? 'bg-blue-50/80 border-blue-300' : 'bg-gray-50 border-gray-200 hover:border-gray-300'
+              }`}
+              onClick={() => setFocusImportant((p) => !p)}
+            >
+              <div className="flex items-start gap-2.5">
+                <div className={`mt-0.5 w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition-all ${
+                  focusImportant ? 'bg-blue-500 border-blue-500' : 'border-gray-300'
+                }`}>
+                  {focusImportant && (
+                    <svg viewBox="0 0 12 12" fill="none" className="w-2.5 h-2.5">
+                      <path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  )}
+                </div>
+                <div>
+                  <p className={`text-xs font-semibold ${
+                    focusImportant ? 'text-blue-700' : 'text-gray-600'
+                  }`}>Focus on important folders only</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">
+                    Desktop · Downloads · Documents · Pictures · Videos · Music
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Footer */}
         <div className="px-6 pb-5 flex gap-3">
           <button
@@ -148,7 +182,7 @@ function PreScanModal({ drive, onConfirm, onCancel }: PreScanModalProps) {
             Cancel
           </button>
           <button
-            onClick={() => onConfirm(selected)}
+            onClick={() => onConfirm(selected, focusImportant)}
             className="flex-1 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-purple-500 text-white text-sm font-semibold hover:shadow-md hover:scale-[1.01] active:scale-95 transition-all flex items-center justify-center gap-1.5"
           >
             Start {selected === 'quick' ? 'Quick' : 'Deep'} Scan
@@ -166,6 +200,7 @@ function App() {
   const [selectedDrive, setSelectedDrive] = useState<DriveInfo | null>(null)
   const [pendingDrive, setPendingDrive] = useState<DriveInfo | null>(null)
   const [scanMode, setScanMode] = useState<ScanMode>('quick')
+  const [scanFocusImportant, setScanFocusImportant] = useState(false)
 
   const handleNavigate = (dest: NavPage) => {
     // Don't allow navigating away mid-scan
@@ -177,8 +212,9 @@ function App() {
     setPendingDrive(drive)
   }
 
-  const handleConfirmScan = (mode: ScanMode) => {
+  const handleConfirmScan = (mode: ScanMode, focusImportant: boolean) => {
     setScanMode(mode)
+    setScanFocusImportant(focusImportant)
     setSelectedDrive(pendingDrive)
     setPendingDrive(null)
     setView('scanning')
@@ -201,7 +237,7 @@ function App() {
       <TitleBar currentPage={activePage} onNavigate={handleNavigate} />
       <div className="flex h-full overflow-hidden">
         {view === 'scanning' ? (
-          <ScanView drive={selectedDrive!} scanMode={scanMode} onBack={handleBackToDashboard} />
+          <ScanView drive={selectedDrive!} scanMode={scanMode} focusImportant={scanFocusImportant} onBack={handleBackToDashboard} />
         ) : page === 'settings' ? (
           <Settings />
         ) : page === 'about' ? (
