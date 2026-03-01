@@ -417,7 +417,7 @@ fn parse_data_attr(data: &[u8]) -> Option<(u64, Vec<DataRun>)> {
     Some((real_size, data_runs))
 }
 
-fn parse_data_runs(data: &[u8]) -> Vec<DataRun> {
+pub fn parse_data_runs(data: &[u8]) -> Vec<DataRun> {
     let mut runs = Vec::new();
     let mut offset = 0;
     let mut prev_cluster: i64 = 0;

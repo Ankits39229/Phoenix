@@ -600,7 +600,9 @@ app.whenReady().then(() => {
   protocol.handle('localfile', (req) => {
     const withoutScheme = req.url.slice('localfile://'.length) // e.g. '/C:/Users/...'
     const decoded = decodeURIComponent(withoutScheme)
-    return net.fetch(`file://${decoded}`)
+    return net.fetch(`file://${decoded}`).catch(() =>
+      new Response(null, { status: 404 })
+    )
   })
   createWindow()
 });

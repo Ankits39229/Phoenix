@@ -150,15 +150,25 @@ impl FileSystemRecoveryEngine {
         let mut deleted_count_scan = 0u64;
         
         // Calculate scan limit based on mode
-        // FileSystem API mode is fast (reads through Windows), so we use higher
-        // limits than raw-disk mode. But we still cap output to prevent OOM/IPC crashes.
-        let max_limit = max_records.unwrap_or(500_000);
+        // With the MFT data-run mapping, we can now read ALL records (including freed
+        // slots) efficiently. For deep scans, scan the entire MFT. For quick scans,
+        // use a reasonable limit. The 200K output cap still prevents OOM/IPC crashes.
         let mft_total = reader.get_mft_total_records().unwrap_or(0);
         
-        let limit = if mft_total > 0 {
-            std::cmp::min(mft_total as usize, max_limit)
+        let limit = if let Some(max) = max_records {
+            // Caller specified a limit
+            if mft_total > 0 {
+                std::cmp::min(mft_total as usize, max)
+            } else {
+                max
+            }
         } else {
-            max_limit
+            // No limit specified (deep scan) — scan entire MFT
+            if mft_total > 0 {
+                mft_total as usize
+            } else {
+                1_000_000 // Safe fallback if MFT size unknown
+            }
         };
         
         // Scan MFT records
@@ -167,10 +177,12 @@ impl FileSystemRecoveryEngine {
         eprintln!("DEBUG [FS]: MFT has {} total records, scanning up to {}", mft_total, limit);
         
         let mut record_num = 0u64;
-        // MFT can have very large gaps of zeroed/unallocated records.
-        // Use a generous tolerance so we don't bail out prematurely.
+        // MFT can have gaps at the very end or between extents.
+        // With the data-run mapping, freed record slots return Ok (raw bytes),
+        // so true failures only happen beyond the MFT's physical extent.
+        // Use a very generous tolerance to avoid premature termination.
         let mut consecutive_failures = 0;
-        let max_consecutive_failures = 20_000;
+        let max_consecutive_failures = 100_000;
         
         // Collect all entries first
         let mut parsed_entries: Vec<MftEntry> = Vec::new();
@@ -221,9 +233,12 @@ impl FileSystemRecoveryEngine {
             record_num += 1;
             
             // Progress reporting - log when we hit key milestones
-            if record_num % 50000 == 0 {
-                eprintln!("DEBUG [FS]: {} records read | {} with FILE sig | {} parsed | {} deleted", 
-                    records_read, records_with_signature, parsed_entries.len(), deleted_count_scan);
+            if record_num % 100000 == 0 && record_num > 0 {
+                let elapsed = start_time.elapsed().as_secs_f32();
+                let rate = record_num as f32 / elapsed.max(0.001);
+                let remaining = if rate > 0.0 { (limit as f32 - record_num as f32) / rate } else { 0.0 };
+                eprintln!("DEBUG [FS]: {} / {} records | {} with FILE sig | {} parsed | {} deleted | {:.0} rec/s | ~{:.0}s remaining", 
+                    record_num, limit, records_with_signature, parsed_entries.len(), deleted_count_scan, rate, remaining);
             }
         }
         
@@ -326,6 +341,11 @@ impl FileSystemRecoveryEngine {
                         }
                     }
                     
+                    // Skip temp/cache/system files found via USN too
+                    if is_temp_file(&usn_file.file_name, &full_path) {
+                        continue;
+                    }
+                    
                     // Get extension
                     let extension = if let Some(pos) = usn_file.file_name.rfind('.') {
                         usn_file.file_name[pos + 1..].to_lowercase()
@@ -359,7 +379,7 @@ impl FileSystemRecoveryEngine {
                                     // MFT record exists but might be reused
                                     if mft_entry.is_deleted || mft_entry.file_name == usn_file.file_name {
                                         // Record still has our deleted file's data
-                                        let chance = if mft_entry.data_runs.is_empty() { 15 } else { 65 };
+                                        let chance = if mft_entry.data_runs.is_empty() { 10 } else { 45 };
                                         let runs_json = serde_json::to_string(&mft_entry.data_runs)
                                             .unwrap_or_else(|_| "[]".to_string());
                                         let first = mft_entry.data_runs.first().map(|r| r.cluster_offset);
@@ -466,18 +486,35 @@ impl FileSystemRecoveryEngine {
 
         // ── Hard cap on output ────────────────────────────────────────────
         // Cap total results to prevent massive JSON that crashes IPC / OOM.
-        // Always keep ALL deleted files; truncate non-deleted if over limit.
-        const MAX_OUTPUT: usize = 200_000;
-        if mft_entries.len() > MAX_OUTPUT {
-            let deleted_count = mft_entries.iter().filter(|f| f.is_deleted).count();
-            eprintln!("DEBUG [FS]: Capping output from {} to {} entries ({} deleted kept)", mft_entries.len(), MAX_OUTPUT, deleted_count);
+        // Strategy:
+        //   1. Always keep ALL deleted files (capped at 100K) — that's what users care about
+        //   2. Fill remaining slots up to 200K with active files (sorted by modified date)
+        const MAX_DELETED: usize = 100_000;
+        const MAX_TOTAL:   usize = 200_000;
+        if mft_entries.len() > MAX_TOTAL {
+            eprintln!("DEBUG [FS]: Capping output from {} entries", mft_entries.len());
 
-            // Partition: deleted first, then non-deleted
-            let (mut deleted, mut active): (Vec<_>, Vec<_>) = mft_entries.into_iter().partition(|f| f.is_deleted);
-            let remaining = MAX_OUTPUT.saturating_sub(deleted.len());
-            active.truncate(remaining);
-            deleted.append(&mut active);
+            let (mut deleted, mut active): (Vec<_>, Vec<_>) =
+                mft_entries.into_iter().partition(|f| f.is_deleted);
+
+            // Within deleted: sort by recovery_chance desc so best ones survive the cap
+            if deleted.len() > MAX_DELETED {
+                deleted.sort_by(|a, b| b.recovery_chance.cmp(&a.recovery_chance));
+                deleted.truncate(MAX_DELETED);
+            }
+
+            // Fill remaining budget with active files
+            let active_budget = MAX_TOTAL.saturating_sub(deleted.len());
+            if active.len() > active_budget {
+                active.truncate(active_budget);
+            }
+
+            deleted.extend(active);
             mft_entries = deleted;
+            eprintln!("DEBUG [FS]: Output capped to {} entries ({} deleted, {} active)",
+                mft_entries.len(),
+                mft_entries.iter().filter(|f| f.is_deleted).count(),
+                mft_entries.iter().filter(|f| !f.is_deleted).count());
         }
 
         let duration = start_time.elapsed();
@@ -616,23 +653,29 @@ impl FileSystemRecoveryEngine {
 
                 // ── Integrity check: validate file header matches expected type ──
                 // If data is clearly wrong (all zeros, encrypted garbage, or wrong
-                // signature), warn the user instead of silently saving corrupt data.
+                // signature), DON'T save it — report an honest failure to the user.
                 let ext = file.extension.to_lowercase();
                 let corruption_warning = detect_corruption(&recovered_data, &ext);
 
                 if let Some(ref warning) = corruption_warning {
-                    // Data looks corrupt — still save it but flag as partial/corrupt
-                    eprintln!("[Recovery] WARNING: '{}' may be corrupt: {}", file.name, warning);
+                    eprintln!("[Recovery] REJECTED '{}': data is corrupt: {}", file.name, warning);
+                    
+                    // Don't save corrupt data — return failure so user knows it's unrecoverable
+                    return Ok(FileRecoveryResultFS {
+                        success: false,
+                        source_path: file.path.clone(),
+                        destination_path: output_path.to_string(),
+                        bytes_recovered: 0,
+                        message: format!(
+                            "Recovery failed for '{}': {}. The file's disk clusters have likely been overwritten by new data.",
+                            file.name, warning
+                        ),
+                    });
                 }
 
                 reader.save_file(&recovered_data, output_path)?;
 
-                let message = if let Some(ref warning) = corruption_warning {
-                    format!(
-                        "Recovered {} bytes but file may be corrupt: {}",
-                        recovered_data.len(), warning
-                    )
-                } else if failed_runs > 0 {
+                let message = if failed_runs > 0 {
                     format!(
                         "Partially recovered {} of {} bytes ({:.1}%). {} run(s) succeeded, {} failed.",
                         recovered_data.len(),
@@ -646,7 +689,7 @@ impl FileSystemRecoveryEngine {
                 };
 
                 return Ok(FileRecoveryResultFS {
-                    success: corruption_warning.is_none(),
+                    success: true,
                     source_path: file.path.clone(),
                     destination_path: output_path.to_string(),
                     bytes_recovered: recovered_data.len() as u64,
@@ -903,7 +946,8 @@ fn build_full_path(
     format!("{}:\\{}", drive_letter, path_parts.join("\\"))
 }
 
-/// Check if file is a temporary file that should be filtered out
+/// Check if file is a temporary/system file that should be filtered out.
+/// NOTE: $Recycle.Bin is NOT filtered — those are user-deleted files we want to recover.
 fn is_temp_file(name: &str, path: &str) -> bool {
     let name_lower = name.to_lowercase();
     let path_lower = path.to_lowercase();
@@ -923,24 +967,38 @@ fn is_temp_file(name: &str, path: &str) -> bool {
     // Temp filename patterns
     if name_lower.starts_with("~$") ||  // Office temp files
        name_lower.starts_with("~") ||   // General temp prefix
-       name_lower.starts_with("tmp") ||
-       name_lower.starts_with("temp") ||
        name_lower.contains(".tmp") {
         return true;
     }
     
-    // Temp directories
+    // Browser cache file patterns:  f_000xxx, data_0, data_1, index, etc.
+    // These are Chrome/Edge disk cache files — not useful for recovery
+    if name_lower.starts_with("f_") && name_lower.len() <= 10 && name_lower.chars().skip(2).all(|c| c.is_ascii_hexdigit()) {
+        return true;
+    }
+    
+    // System/temp directories (but NOT $Recycle.Bin — those are user-deleted files)
     if path_lower.contains("\\temp\\") ||
        path_lower.contains("\\tmp\\") ||
        path_lower.contains("\\appdata\\local\\temp") ||
        path_lower.contains("\\windows\\temp") ||
-       path_lower.contains("\\$recycle.bin") ||
        path_lower.contains("\\system volume information") ||
        path_lower.contains("\\prefetch") ||
        path_lower.contains("\\.cache\\") ||
        path_lower.contains("\\cache\\") ||
+       path_lower.contains("\\cache_data\\") ||
+       path_lower.contains("\\code cache\\") ||
+       path_lower.contains("\\gpucache\\") ||
+       path_lower.contains("\\shadercache\\") ||
        path_lower.contains("\\thumbnails\\") ||
-       path_lower.contains("\\winsxs\\") {
+       path_lower.contains("\\winsxs\\") ||
+       path_lower.contains("\\windows\\assembly") ||
+       path_lower.contains("\\windows\\installer") ||
+       path_lower.contains("\\microsoft\\windows\\inetcache") ||
+       path_lower.contains("\\local\\microsoft\\edge") ||
+       path_lower.contains("\\local\\google\\chrome") ||
+       path_lower.contains("\\local\\mozilla\\firefox") ||
+       path_lower.contains("\\local\\packages\\") {
         return true;
     }
     
@@ -984,24 +1042,32 @@ fn mft_entry_to_recoverable_with_path(
     let category = categorize_file(&extension);
     let file_type = extension.clone();
     
-    // Recovery chance based on deletion status, size, and data availability
+    // Recovery chance based on deletion status, size, and data availability.
+    // For deleted files, clusters may have been reallocated by Windows, so
+    // chances are much lower than for active files.  Be realistic so users
+    // don't expect perfect recovery.
     let recovery_chance = if !entry.is_deleted {
-        95 // Existing files: very high chance
+        95 // Existing files: very high chance (direct copy)
     } else if entry.data_runs.is_empty() {
-        // Deleted with no cluster data
-        if entry.file_size <= 1024 {
-            85 // Small files might be resident in MFT
+        // Deleted with no cluster data — very hard to recover
+        if entry.file_size <= 700 {
+            50 // Tiny files might still be resident in the MFT record
         } else if entry.file_size <= 100 * 1024 {
-            60 // Small-medium files might be in Recycle Bin or VSS
+            15 // Small-medium — no cluster chain, low chance
         } else {
-            15 // Larger files without cluster data are very unlikely to recover
+            5  // Larger files without cluster data are almost impossible
         }
     } else {
-        // Deleted with cluster data available
-        if entry.file_size <= 1024 * 1024 {
-            85 // Small deleted files with data_runs: high chance
+        // Deleted with cluster data available — clusters may still be valid
+        // but on a busy system drive they get reused quickly
+        if entry.file_size <= 4096 {
+            60 // Very small files: clusters less likely reused
+        } else if entry.file_size <= 100 * 1024 {
+            45 // Small files: moderate chance of intact clusters
+        } else if entry.file_size <= 1024 * 1024 {
+            30 // Medium files: clusters more likely partially overwritten
         } else {
-            70 // Large deleted files: moderate-high chance
+            20 // Large files: many clusters, high overlap risk
         }
     };
     
@@ -1026,28 +1092,15 @@ fn mft_entry_to_recoverable_with_path(
     // Build proper full path using directory map
     let full_path = build_full_path(drive_letter, entry.parent_record, &entry.file_name, dir_map);
     
-    // TEMPORARILY DISABLED: Don't filter temp files for debugging
-    // Skip temporary files
-    // if is_temp_file(&entry.file_name, &full_path) {
-    //     if extension == "png" {
-    //         eprintln!("PNG FILTERED: temp file\n");
-    //     }
-    //     return None;
-    // }
+    // Skip temporary/system/cache files — they flood results with junk
+    if is_temp_file(&entry.file_name, &full_path) {
+        return None;
+    }
 
-    // TEMPORARILY DISABLED: Show all deleted files regardless of cluster data
-    // For deleted files: be lenient with filtering
-    // if entry.is_deleted {
-    //     if entry.data_runs.is_empty() && entry.file_size > 10 * 1024 * 1024 {
-    //         if extension == "png" {
-    //             eprintln!("PNG FILTERED: large deleted file with no cluster data\n");
-    //         }
-    //         return None;
-    //     }
-    //     if extension == "png" {
-    //         eprintln!("PNG INCLUDED: deleted file passed filters\n");
-    //     }
-    // }
+    // For deleted files: filter out large files with no data runs (unrecoverable)
+    if entry.is_deleted && entry.data_runs.is_empty() && entry.file_size > 10 * 1024 * 1024 {
+        return None;
+    }
 
     // Detect files in the Recycle Bin — they were deleted by the user even
     // though the MFT record is still marked "in use".

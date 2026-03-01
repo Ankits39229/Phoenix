@@ -159,16 +159,21 @@ fn perform_scan_filesystem(drive_letter: &str, mode: &str) -> recovery_engine::R
     
     // Perform filesystem scan with mode-specific parameters.
     // FileSystem API reads through Windows' decryption layer and is much faster
-    // than raw disk access, so we can afford higher limits than raw-disk mode.
-    // Quick: 250K MFT records  →  ~10-20s, finds user files in common folders.
-    // Deep:  500K MFT records  →  thorough, covers most user files on the drive.
-    // We cap at 500K to keep JSON output under ~150MB (avoidable OOM / IPC crash).
+    // than raw disk access. With MFT data-run mapping, we can now read ALL
+    // records including freed/deleted slots efficiently.
+    // Quick: 500K MFT records  →  ~10-20s, finds most user files.
+    // Deep:  ALL MFT records   →  thorough, covers every file on the drive.
+    // Output is capped at 200K entries to prevent OOM / IPC crashes.
     let (max_records, hours_limit): (Option<usize>, Option<u64>) = match mode {
-        "deep" => (Some(500_000), None),
-        _      => (Some(250_000), Some(24)),
+        "deep" => (None, None),                   // Scan ENTIRE MFT
+        _      => (Some(500_000), Some(24)),       // Quick: cap at 500K records
     };
 
-    eprintln!("[Main]: {} scan — scanning up to {} MFT records", mode, max_records.unwrap());
+    let limit_desc = match max_records {
+        Some(n) => format!("{}", n),
+        None => "ALL".to_string(),
+    };
+    eprintln!("[Main]: {} scan — scanning {} MFT records", mode, limit_desc);
 
     match engine.scan_mft(max_records, hours_limit) {
         Ok(fs_result) => {

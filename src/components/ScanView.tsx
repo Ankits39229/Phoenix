@@ -161,6 +161,9 @@ const FileCard = memo(function FileCard({
   const cat = useMemo(() => getCategory(file), [file.extension])
 
   const ext = (file.extension || '').toLowerCase().replace(/^\./, '')
+  // Only preview images that still physically exist on disk.
+  // Deleted MFT entries have no on-disk content to read, so skip them entirely
+  // rather than firing a request that logs a 404 for every card.
   const canPreview = !file.is_deleted && IMG_PREVIEW_EXTS.has(ext) && !!file.path
   const [imgFailed, setImgFailed] = useState(false)
 
@@ -202,19 +205,15 @@ const FileCard = memo(function FileCard({
         </div>
       </div>
 
-      {/* Deleted badge */}
-      {file.is_deleted && (
-        <div className="absolute top-1.5 right-1.5 w-3.5 h-3.5 rounded-full bg-red-400/80 flex items-center justify-center">
-          <svg viewBox="0 0 12 12" fill="none" className="w-2 h-2">
-            <path d="M3 3h6M5 3V2h2v1M4 5v3M8 5v3M3.5 3l.5 6h4l.5-6" stroke="white" strokeWidth="1.2" strokeLinecap="round" />
-          </svg>
-        </div>
-      )}
-
       {/* Name */}
       <div className="px-2 py-1.5 bg-white/80 border-t border-gray-100/60">
         <p className="text-[10px] text-gray-600 truncate font-medium" title={file.name}>{file.name || 'Unknown'}</p>
-        <p className="text-[9px] text-gray-400 truncate">{formatBytes(file.size)}</p>
+        <div className="flex items-center justify-between">
+          <p className="text-[9px] text-gray-400 truncate">{formatBytes(file.size)}</p>
+          <span className={`text-[9px] font-bold ${
+            file.recovery_chance >= 80 ? 'text-green-500' : file.recovery_chance >= 40 ? 'text-yellow-500' : 'text-red-400'
+          }`}>{file.recovery_chance}%</span>
+        </div>
       </div>
     </div>
   )

@@ -30,6 +30,13 @@ pub struct UsnDeletedFile {
     pub reason: u32,
 }
 
+/// Physical extent of $MFT on disk (for fragmentation-aware reading)
+/// Extents are stored in logical order: extent 0 is first logically, etc.
+struct MftExtent {
+    physical_cluster: u64,
+    cluster_count: u64,
+}
+
 /// File system-based disk reader for encrypted drives
 /// Uses Windows CreateFile with backup semantics to access volume
 pub struct FileSystemDiskReader {
@@ -42,6 +49,8 @@ pub struct FileSystemDiskReader {
     mft_record_size: u64,  // Actual MFT record size from boot sector (usually 1024, can be 4096)
     cluster_size: u64,  // Actual NTFS cluster size from boot sector (usually 4096)
     mft_file_open_attempted: bool,  // Track whether we already tried opening $MFT file
+    mft_extents: Vec<MftExtent>,    // $MFT data run extents for direct MFT reading
+    mft_extents_built: bool,        // Whether we've built the extent map
 }
 
 #[cfg(windows)]
@@ -157,6 +166,8 @@ impl FileSystemDiskReader {
             mft_record_size: MFT_RECORD_SIZE,  // Default, will be updated from boot sector
             cluster_size: 4096,  // Default, will be updated from boot sector
             mft_file_open_attempted: false,
+            mft_extents: Vec::new(),
+            mft_extents_built: false,
         })
     }
     
@@ -262,16 +273,29 @@ impl FileSystemDiskReader {
     }
     
     /// Open the $MFT file directly through Windows filesystem API
-    /// This is the CORRECT way to read MFT - Windows handles:
+    /// This is the BEST way to read MFT - Windows handles:
     /// - MFT fragmentation (data runs)
     /// - BitLocker decryption
-    /// - Record N is at simple offset N * 1024
+    /// - Record N is at simple offset N * record_size
+    /// - ALL records readable including freed/deleted slots
     #[cfg(windows)]
     fn open_mft_file(&mut self) -> Result<(), String> {
         self.mft_file_open_attempted = true;
-        // $MFT typically cannot be opened as a regular file (ACCESS_DENIED)
-        // FSCTL_GET_NTFS_FILE_RECORD via read_mft_record_via_ioctl is used instead
-        Err("$MFT file access not available".to_string())
+        
+        // Try to open $MFT directly - works on some Windows versions with admin + backup semantics
+        let mft_path = format!("{}:\\$MFT", self.drive_letter);
+        match win_api::open_with_backup_semantics(&mft_path) {
+            Ok(handle) => {
+                let file = unsafe { File::from_raw_handle(handle as *mut std::ffi::c_void) };
+                self.mft_file_handle = Some(file);
+                eprintln!("[MFT]: Successfully opened $MFT file directly — best method for reading all records");
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("[MFT]: Cannot open $MFT directly ({}), will use FSCTL + data-run mapping", e);
+                Err(e)
+            }
+        }
     }
     
     /// Read a single MFT record using FSCTL_GET_NTFS_FILE_RECORD
@@ -369,7 +393,141 @@ impl FileSystemDiskReader {
         Ok(record_data)
     }
     
+    /// Build a map of $MFT's physical extents by reading MFT record 0's DATA attribute.
+    /// This enables reading ANY MFT record (including freed/deleted slots) by computing
+    /// its physical disk location from the MFT's own data runs.
+    #[cfg(windows)]
+    fn build_mft_data_run_map(&mut self) -> Result<(), String> {
+        if self.mft_extents_built {
+            return Ok(());
+        }
+        self.mft_extents_built = true;
+        
+        // Read MFT record 0 via FSCTL — record 0 ($MFT itself) is always in-use
+        let record0 = self.read_mft_record_via_ioctl(0)?;
+        
+        if record0.len() < 56 || &record0[0..4] != b"FILE" {
+            return Err("MFT record 0 invalid".to_string());
+        }
+        
+        // Walk attributes to find the unnamed DATA (0x80) attribute
+        let first_attr = u16::from_le_bytes([record0[0x14], record0[0x15]]) as usize;
+        let mut offset = first_attr;
+        
+        while offset + 8 < record0.len() {
+            let attr_type = u32::from_le_bytes([
+                record0[offset], record0[offset+1], record0[offset+2], record0[offset+3]
+            ]);
+            if attr_type == 0xFFFFFFFF || attr_type == 0 { break; }
+            
+            let attr_len = u32::from_le_bytes([
+                record0[offset+4], record0[offset+5], record0[offset+6], record0[offset+7]
+            ]) as usize;
+            if attr_len == 0 || offset + attr_len > record0.len() { break; }
+            
+            // DATA attribute = 0x80, non-resident (byte at offset+8 != 0)
+            if attr_type == 0x80 && record0[offset + 8] != 0 {
+                // Check that this is the unnamed stream (name_length = 0 at offset+9)
+                let name_length = record0[offset + 9];
+                if name_length != 0 {
+                    offset += attr_len;
+                    continue;
+                }
+                
+                // Data runs start at the offset given at attribute+32
+                let runs_offset = u16::from_le_bytes([
+                    record0[offset + 32], record0[offset + 33]
+                ]) as usize;
+                
+                if offset + runs_offset >= record0.len() { break; }
+                let runs_end = (offset + attr_len).min(record0.len());
+                let runs_data = &record0[offset + runs_offset..runs_end];
+                
+                // Parse data runs using the shared NTFS parser
+                let data_runs = crate::ntfs_parser::parse_data_runs(runs_data);
+                
+                self.mft_extents.clear();
+                for run in &data_runs {
+                    if run.cluster_offset > 0 && run.cluster_count > 0 {
+                        self.mft_extents.push(MftExtent {
+                            physical_cluster: run.cluster_offset as u64,
+                            cluster_count: run.cluster_count,
+                        });
+                    }
+                }
+                
+                let total_clusters: u64 = self.mft_extents.iter().map(|e| e.cluster_count).sum();
+                let total_bytes = total_clusters * self.cluster_size;
+                let approx_records = total_bytes / self.mft_record_size;
+                eprintln!("[MFT-MAP]: Built extent map: {} extents, {} clusters, ~{} records",
+                    self.mft_extents.len(), total_clusters, approx_records);
+                
+                return Ok(());
+            }
+            
+            offset += attr_len;
+        }
+        
+        Err("Could not find DATA attribute in MFT record 0".to_string())
+    }
+    
+    /// Read an MFT record by computing its physical location from the MFT extent map.
+    /// This works for ALL records including freed/deleted ones — bypasses FSCTL limitations.
+    #[cfg(windows)]
+    fn read_mft_record_via_data_runs(&mut self, record_number: u64) -> Result<Vec<u8>, String> {
+        // Ensure the extent map is built
+        if !self.mft_extents_built {
+            self.build_mft_data_run_map()?;
+        }
+        
+        if self.mft_extents.is_empty() {
+            return Err("No MFT extents available".to_string());
+        }
+        
+        let record_size = self.mft_record_size;
+        let cluster_size = self.cluster_size;
+        
+        // Calculate which logical MFT cluster this record lives in
+        let logical_byte = record_number * record_size;
+        let logical_cluster = logical_byte / cluster_size;
+        let offset_in_cluster = (logical_byte % cluster_size) as usize;
+        
+        // Walk through extents to find the matching physical cluster
+        let mut logical_start = 0u64;
+        for extent in &self.mft_extents {
+            let logical_end = logical_start + extent.cluster_count;
+            if logical_cluster >= logical_start && logical_cluster < logical_end {
+                let cluster_in_extent = logical_cluster - logical_start;
+                let physical_cluster = extent.physical_cluster + cluster_in_extent;
+                let physical_byte = physical_cluster * cluster_size + offset_in_cluster as u64;
+                
+                // Read from volume handle
+                if self.volume_handle.is_none() {
+                    self.open_volume()?;
+                }
+                let file = self.volume_handle.as_mut().ok_or("No volume handle")?;
+                file.seek(SeekFrom::Start(physical_byte))
+                    .map_err(|e| format!("Seek to MFT record {} failed: {}", record_number, e))?;
+                
+                let mut buffer = vec![0u8; record_size as usize];
+                file.read_exact(&mut buffer)
+                    .map_err(|e| format!("Read MFT record {} failed: {}", record_number, e))?;
+                
+                return Ok(buffer);
+            }
+            logical_start = logical_end;
+        }
+        
+        Err(format!("MFT record {} beyond extent map (logical cluster {})", record_number, logical_cluster))
+    }
+    
     /// Read MFT records - Windows handles decryption automatically
+    ///
+    /// Fallback chain:
+    /// 1. $MFT file handle — best method, reads ALL records including freed/deleted
+    /// 2. FSCTL_GET_NTFS_FILE_RECORD — reliable for in-use records only
+    /// 3. MFT data-run mapping — reads physical bytes, works for freed records
+    /// 4. Raw volume offset — last resort, only works if MFT is not fragmented
     pub fn read_mft_record(&mut self, record_number: u64) -> Result<Vec<u8>, String> {
         let record_size = self.mft_record_size;
         
@@ -387,16 +545,33 @@ impl FileSystemDiskReader {
             }
         }
         
-        // Method 2: FSCTL_GET_NTFS_FILE_RECORD - handles fragmentation + BitLocker via NTFS driver
+        // Method 2: FSCTL_GET_NTFS_FILE_RECORD — works for in-use records
+        // For freed records, FSCTL returns a different record number; we detect this
+        // and fall through to Method 3 which can read freed slots.
         #[cfg(windows)]
         {
             match self.read_mft_record_via_ioctl(record_number) {
                 Ok(buffer) => return Ok(buffer),
-                Err(_) => {} // Fall through to raw volume
+                Err(_) => {
+                    // Freed slot or other FSCTL error — try data-run mapping next
+                }
             }
         }
         
-        // Method 3: Fallback to raw volume offset (works for non-fragmented MFT start)
+        // Method 3: MFT data-run mapping — reads actual physical bytes on disk.
+        // This handles MFT fragmentation AND can read freed/deleted record slots
+        // that FSCTL refuses to return. This is the key method for finding deleted files.
+        #[cfg(windows)]
+        {
+            match self.read_mft_record_via_data_runs(record_number) {
+                Ok(buffer) => return Ok(buffer),
+                Err(_) => {
+                    // Data-run map not available or record beyond extents
+                }
+            }
+        }
+        
+        // Method 4: Fallback to raw volume offset (works for non-fragmented MFT)
         if self.mft_handle.is_none() {
             self.open_mft()?;
         }
